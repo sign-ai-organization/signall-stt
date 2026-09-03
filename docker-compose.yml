@@ -1,0 +1,28 @@
+services:
+  stt:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MODEL_SIZE: ${MODEL_SIZE:-medium}
+      DEVICE: ${DEVICE:-cuda}
+      COMPUTE_TYPE: ${COMPUTE_TYPE:-float16}
+      LANGUAGE: ${LANGUAGE:-es}
+      NO_SPEECH_THRESHOLD: ${NO_SPEECH_THRESHOLD:-0.6}
+      AVG_LOGPROB_THRESHOLD: ${AVG_LOGPROB_THRESHOLD:--0.8}
+      MIN_RMS: ${MIN_RMS:-0.008}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    # Requiere NVIDIA Container Toolkit (o Docker Desktop con soporte GPU habilitado).
+    # Si no tenés GPU, borrá este bloque y poné DEVICE=cpu / COMPUTE_TYPE=int8 arriba;
+    # igual hay fallback automático a CPU si la GPU falla al cargar el modelo.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  hf-cache:
