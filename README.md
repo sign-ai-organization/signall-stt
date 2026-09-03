@@ -1,6 +1,4 @@
 # sign-ai-stt
-<<<<<<< HEAD
-=======
 
 Servicio de Speech-to-Text (español) para el proyecto SignAI. Recibe audio del
 cliente (app móvil) y devuelve texto transcrito en tiempo real, usando
@@ -110,4 +108,3 @@ app/
 scripts/
   mic_test_client.py  # cliente de prueba (no va en la imagen Docker)
 ```
->>>>>>> develop
