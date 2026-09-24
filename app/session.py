@@ -95,10 +95,10 @@ class StreamingSession:
             and (now - self._last_partial_time) * 1000 >= self._settings.PARTIAL_INTERVAL_MS
         )
         if do_partial:
-            self._last_partial_time = now
             buffer_copy = self._speech_buffer.copy()
 
             text = await asyncio.to_thread(transcribe_buffer, self._model, buffer_copy, self._settings)
+            self._last_partial_time = time.time()
             if text:
                 return {"type": "partial", "text": text}
 
