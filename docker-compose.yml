@@ -12,7 +12,7 @@ services:
       AVG_LOGPROB_THRESHOLD: ${AVG_LOGPROB_THRESHOLD:--0.8}
       MIN_RMS: ${MIN_RMS:-0.008}
       VAD_AGGRESSIVENESS: ${VAD_AGGRESSIVENESS:-0}
-      SILENCE_TIMEOUT_MS: ${SILENCE_TIMEOUT_MS:-600}
+      SILENCE_TIMEOUT_MS: ${SILENCE_TIMEOUT_MS:-1500}
     volumes:
       - hf-cache:/root/.cache/huggingface
     # Requiere NVIDIA Container Toolkit (o Docker Desktop con soporte GPU habilitado).
