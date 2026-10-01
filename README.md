@@ -40,7 +40,7 @@ El servicio queda en `http://localhost:8000`.
 | `DEVICE` | `cuda` | `cuda` o `cpu` |
 | `COMPUTE_TYPE` | `float16` | `float16` (GPU) o `int8` (CPU) |
 | `LANGUAGE` | `es` | Idioma para Whisper |
-| `VAD_AGGRESSIVENESS` | `0` | 0 (permisivo) a 3 (estricto) |
+| `VAD_AGGRESSIVENESS` | `2` | 0 (permisivo) a 3 (estricto) |
 | `SILENCE_TIMEOUT_MS` | `1500` | Silencio para cerrar un segmento |
 | `MIN_RMS` | `0.008` | Filtro anti-alucinación por energía |
 

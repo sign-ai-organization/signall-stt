@@ -23,8 +23,8 @@ class Settings:
     COMPUTE_TYPE: str = os.getenv("COMPUTE_TYPE", "float16")
     LANGUAGE: str = os.getenv("LANGUAGE", "es")
 
-    VAD_AGGRESSIVENESS: int = _env_int("VAD_AGGRESSIVENESS", 0)
-    SILENCE_TIMEOUT_MS: int = _env_int("SILENCE_TIMEOUT_MS", 600)
+    VAD_AGGRESSIVENESS: int = _env_int("VAD_AGGRESSIVENESS", 2)
+    SILENCE_TIMEOUT_MS: int = _env_int("SILENCE_TIMEOUT_MS", 1500)
     PARTIAL_INTERVAL_MS: int = _env_int("PARTIAL_INTERVAL_MS", 400)
     MIN_AUDIO_MS_FOR_PARTIAL: int = _env_int("MIN_AUDIO_MS_FOR_PARTIAL", 200)
     MAX_BUFFER_MS: int = _env_int("MAX_BUFFER_MS", 8000)
