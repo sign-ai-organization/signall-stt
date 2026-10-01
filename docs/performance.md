@@ -37,3 +37,64 @@ Mismas frases habladas, con pausas largas entre ellas:
 **Cambio:** `VAD_AGGRESSIVENESS` por defecto pasa a 2. Además,
 `SILENCE_TIMEOUT_MS` por defecto en `config.py` pasa de 600 a 1500, para
 coincidir con `docker-compose.yml` y el README.
+
+---
+
+## 2. Parciales desactivados (prueba)
+
+**Fecha:** 2026-10-01
+
+| | Con parciales | Sin parciales |
+|---|---:|---:|
+| Atraso máximo del procesamiento | 5817 ms | ~0 ms |
+| Picos de transcripción de 6–8 s | sí | no |
+| Fin de la habla → final, peor caso | 7742 ms | 2635 ms |
+| Fin de la habla → final, típico | 1880–2047 ms | 2148–2635 ms |
+
+- Sin parciales, el VAD procesa el audio en tiempo real y desaparecen
+  los picos.
+- Los finales tardan más en transcribirse con duraciones de audio
+  similares (5.0 s: 409 → 803 ms), y el primero tras arrancar tarda
+  1165 ms. Hipótesis sin confirmar: arranque de CUDA en la primera
+  inferencia, y GPU que baja su frecuencia al quedar ociosa entre
+  frases.
+
+**Conclusión:** desactivar los parciales incumple RF-STT-02
+(transcripción progresiva: el texto debe actualizarse mientras el
+usuario habla). Se mantienen los parciales, pero sin bloquear el
+procesamiento del audio: uno a la vez en segundo plano, descartados si
+su final ya salió y sin generarse durante el silencio.
+
+---
+
+## 3. Parciales en segundo plano
+
+**Fecha:** 2026-10-01
+**Cambio:** la transcripción parcial corre en segundo plano y ya no
+detiene el procesamiento del audio. Nunca hay más de un parcial a la
+vez, un parcial que termina después del final de su frase se descarta,
+y no se generan parciales sin habla nueva. Activos por defecto
+(`PARTIAL_INTERVAL_MS=400`).
+
+| | Parciales bloqueantes | Sin parciales | Parciales en segundo plano |
+|---|---:|---:|---:|
+| Texto en vivo (RF-STT-02) | sí | no | **sí** |
+| Atraso máximo del procesamiento | 5817 ms | ~0 ms | **~0 ms** |
+| Picos de 6–8 s | sí | no | **no** |
+| Fin de la habla → final (con voz) | 1880–2047 ms | 2148–2635 ms | **1862 ms** |
+
+- El atraso se mantuvo entre −28 y −30 ms toda la sesión: el VAD
+  procesa el audio en tiempo real aunque Whisper esté calculando un
+  parcial.
+- En esta sesión no se observó que un parcial en curso retrasara un
+  final.
+
+**Hallazgo: se pierden frases con voz.** En dos frases los parciales
+tenían texto (transcripciones de 341–692 ms), pero el final salió vacío
+(`transcripcion=0ms`). `transcribe_buffer` descarta el buffer completo
+si su energía promedio (RMS) es menor que `MIN_RMS`, y el buffer del
+final incluye siempre los 1500 ms de silencio que lo cerraron, lo que
+baja el promedio por debajo del umbral. Los parciales no lo sufren
+porque no llevan esa cola de silencio. Algunos "finales vacíos" de las
+entradas 1 y 2 probablemente eran frases perdidas por esta misma causa,
+no solo ruido.

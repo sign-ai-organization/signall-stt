@@ -36,11 +36,21 @@ class StreamingSession:
         self._processed_audio_ms = 0
         self._speech_end_audio_ms = 0
 
+        # Parciales en segundo plano
+        self._partial_task: asyncio.Task | None = None
+        self._ready_partial: dict | None = None
+        self._speech_since_partial = False
+
     async def feed(self, chunk: bytes) -> list[dict]:
         if self._first_chunk_at is None:
             self._first_chunk_at = time.monotonic()
         self._pcm_buffer.extend(chunk)
         results = []
+
+        # El parcial listo se entrega antes de procesar audio nuevo
+        if self._ready_partial is not None:
+            results.append(self._ready_partial)
+            self._ready_partial = None
 
         bpf = self._settings.bytes_per_frame
         while len(self._pcm_buffer) >= bpf:
@@ -60,6 +70,7 @@ class StreamingSession:
         self._speech_buffer = np.zeros(0, dtype=np.float32)
         self._is_speaking = False
         self._silence_ms = 0
+        self._close_utterance()
 
         text = await asyncio.to_thread(transcribe_buffer, self._model, buffer_copy, self._settings)
         return {"type": "final", "text": text} if text else None
@@ -79,6 +90,7 @@ class StreamingSession:
             self._speech_buffer = np.concatenate([self._speech_buffer, frame_float])
             self._silence_ms = 0
             self._is_speaking = True
+            self._speech_since_partial = True
         elif self._is_speaking:
             if self._silence_ms == 0:
                 self._speech_end_audio_ms = self._processed_audio_ms - self._settings.FRAME_DURATION_MS
@@ -98,6 +110,7 @@ class StreamingSession:
             self._speech_buffer = np.zeros(0, dtype=np.float32)
             self._is_speaking = False
             self._silence_ms = 0
+            self._close_utterance()
 
             lag_ms = self._lag_ms()
             started = time.monotonic()
@@ -107,27 +120,45 @@ class StreamingSession:
             return {"type": "final", "text": text}
 
         do_partial = (
-            self._is_speaking
+            self._settings.PARTIAL_INTERVAL_MS > 0
+            and self._is_speaking
+            and self._speech_since_partial
+            and (self._partial_task is None or self._partial_task.done())
             and buffer_ms >= self._settings.MIN_AUDIO_MS_FOR_PARTIAL
             and (now - self._last_partial_time) * 1000 >= self._settings.PARTIAL_INTERVAL_MS
         )
         if do_partial:
-            buffer_copy = self._speech_buffer.copy()
-
-            lag_ms = self._lag_ms()
-            started = time.monotonic()
-            text = await asyncio.to_thread(transcribe_buffer, self._model, buffer_copy, self._settings)
-            transcribe_ms = (time.monotonic() - started) * 1000
-            print(
-                f"[timing] parcial: audio={buffer_ms / 1000:.1f}s "
-                f"transcripcion={transcribe_ms:.0f}ms atraso={lag_ms:.0f}ms",
-                flush=True,
+            self._speech_since_partial = False
+            self._partial_task = asyncio.create_task(
+                self._run_partial(self._speech_buffer.copy(), buffer_ms, self._utterance_id)
             )
-            self._last_partial_time = time.time()
-            if text:
-                return {"type": "partial", "text": text}
 
         return None
+
+    def _close_utterance(self) -> None:
+        self._utterance_id += 1
+        self._ready_partial = None
+        self._speech_since_partial = False
+
+    async def _run_partial(self, buffer_copy: np.ndarray, buffer_ms: float, utterance_id: int) -> None:
+        lag_ms = self._lag_ms()
+        started = time.monotonic()
+        try:
+            text = await asyncio.to_thread(transcribe_buffer, self._model, buffer_copy, self._settings)
+        except Exception as exc:
+            print(f"[ERROR] transcripción parcial falló: {exc}", flush=True)
+            return
+        finally:
+            self._last_partial_time = time.time()
+
+        transcribe_ms = (time.monotonic() - started) * 1000
+        print(
+            f"[timing] parcial: audio={buffer_ms / 1000:.1f}s "
+            f"transcripcion={transcribe_ms:.0f}ms atraso={lag_ms:.0f}ms",
+            flush=True,
+        )
+        if text and utterance_id == self._utterance_id:
+            self._ready_partial = {"type": "partial", "text": text}
 
     def _lag_ms(self) -> float:
         """Cuánto va atrasado el procesamiento respecto al audio real recibido."""

@@ -13,6 +13,7 @@ services:
       MIN_RMS: ${MIN_RMS:-0.008}
       VAD_AGGRESSIVENESS: ${VAD_AGGRESSIVENESS:-2}
       SILENCE_TIMEOUT_MS: ${SILENCE_TIMEOUT_MS:-1500}
+      PARTIAL_INTERVAL_MS: ${PARTIAL_INTERVAL_MS:-400}
     volumes:
       - hf-cache:/root/.cache/huggingface
     # Requiere NVIDIA Container Toolkit (o Docker Desktop con soporte GPU habilitado).
