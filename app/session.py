@@ -30,7 +30,15 @@ class StreamingSession:
         self._silence_ms = 0
         self._last_partial_time = time.time()
 
+        # Medición de latencia: el cliente envía audio en tiempo real, así que
+        # el audio ya procesado se compara contra el reloj desde el primer chunk.
+        self._first_chunk_at: float | None = None
+        self._processed_audio_ms = 0
+        self._speech_end_audio_ms = 0
+
     async def feed(self, chunk: bytes) -> list[dict]:
+        if self._first_chunk_at is None:
+            self._first_chunk_at = time.monotonic()
         self._pcm_buffer.extend(chunk)
         results = []
 
@@ -65,11 +73,15 @@ class StreamingSession:
         except Exception:
             speech_detected = False
 
+        self._processed_audio_ms += self._settings.FRAME_DURATION_MS
+
         if speech_detected:
             self._speech_buffer = np.concatenate([self._speech_buffer, frame_float])
             self._silence_ms = 0
             self._is_speaking = True
         elif self._is_speaking:
+            if self._silence_ms == 0:
+                self._speech_end_audio_ms = self._processed_audio_ms - self._settings.FRAME_DURATION_MS
             self._speech_buffer = np.concatenate([self._speech_buffer, frame_float])
             self._silence_ms += self._settings.FRAME_DURATION_MS
 
@@ -81,12 +93,17 @@ class StreamingSession:
             or buffer_ms >= self._settings.MAX_BUFFER_MS
         )
         if do_final:
+            reason = "silencio" if self._silence_ms >= self._settings.SILENCE_TIMEOUT_MS else "buffer_max"
             buffer_copy = self._speech_buffer
             self._speech_buffer = np.zeros(0, dtype=np.float32)
             self._is_speaking = False
             self._silence_ms = 0
 
+            lag_ms = self._lag_ms()
+            started = time.monotonic()
             text = await asyncio.to_thread(transcribe_buffer, self._model, buffer_copy, self._settings)
+            transcribe_ms = (time.monotonic() - started) * 1000
+            self._log_final(reason, buffer_ms, transcribe_ms, lag_ms)
             return {"type": "final", "text": text}
 
         do_partial = (
@@ -97,9 +114,34 @@ class StreamingSession:
         if do_partial:
             buffer_copy = self._speech_buffer.copy()
 
+            lag_ms = self._lag_ms()
+            started = time.monotonic()
             text = await asyncio.to_thread(transcribe_buffer, self._model, buffer_copy, self._settings)
+            transcribe_ms = (time.monotonic() - started) * 1000
+            print(
+                f"[timing] parcial: audio={buffer_ms / 1000:.1f}s "
+                f"transcripcion={transcribe_ms:.0f}ms atraso={lag_ms:.0f}ms",
+                flush=True,
+            )
             self._last_partial_time = time.time()
             if text:
                 return {"type": "partial", "text": text}
 
         return None
+
+    def _lag_ms(self) -> float:
+        """Cuánto va atrasado el procesamiento respecto al audio real recibido."""
+        elapsed_ms = (time.monotonic() - self._first_chunk_at) * 1000
+        return elapsed_ms - self._processed_audio_ms
+
+    def _log_final(self, reason: str, buffer_ms: float, transcribe_ms: float, lag_ms: float) -> None:
+        line = (
+            f"[timing] final ({reason}): audio={buffer_ms / 1000:.1f}s "
+            f"transcripcion={transcribe_ms:.0f}ms atraso={lag_ms:.0f}ms"
+        )
+        if reason == "silencio":
+            # Momento real (reloj) en que terminó la habla: el audio llega en tiempo real.
+            speech_end_at = self._first_chunk_at + self._speech_end_audio_ms / 1000
+            end_to_final_ms = (time.monotonic() - speech_end_at) * 1000
+            line += f" fin_habla->final={end_to_final_ms:.0f}ms"
+        print(line, flush=True)
