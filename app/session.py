@@ -7,6 +7,7 @@ conexiones WebSocket concurrentes (una por cada cliente móvil).
 
 import asyncio
 import time
+from collections import deque
 
 import numpy as np
 import webrtcvad
@@ -30,11 +31,12 @@ class StreamingSession:
         self._silence_ms = 0
         self._last_partial_time = time.time()
 
-        # Medición de latencia: el cliente envía audio en tiempo real, así que
-        # el audio ya procesado se compara contra el reloj desde el primer chunk.
         self._first_chunk_at: float | None = None
         self._processed_audio_ms = 0
         self._speech_end_audio_ms = 0
+
+        onset_frames = max(1, settings.SPEECH_ONSET_WINDOW_MS // settings.FRAME_DURATION_MS)
+        self._onset_window: deque[tuple[np.ndarray, bool]] = deque(maxlen=onset_frames)
 
         # Parciales en segundo plano
         self._utterance_id = 0
@@ -87,12 +89,13 @@ class StreamingSession:
 
         self._processed_audio_ms += self._settings.FRAME_DURATION_MS
 
-        if speech_detected:
+        if not self._is_speaking:
+            self._detect_speech_onset(frame_float, speech_detected)
+        elif speech_detected:
             self._speech_buffer = np.concatenate([self._speech_buffer, frame_float])
             self._silence_ms = 0
-            self._is_speaking = True
             self._speech_since_partial = True
-        elif self._is_speaking:
+        else:
             if self._silence_ms == 0:
                 self._speech_end_audio_ms = self._processed_audio_ms - self._settings.FRAME_DURATION_MS
             self._speech_buffer = np.concatenate([self._speech_buffer, frame_float])
@@ -137,9 +140,20 @@ class StreamingSession:
 
         return None
 
+    def _detect_speech_onset(self, frame_float: np.ndarray, speech_detected: bool) -> None:
+        self._onset_window.append((frame_float, speech_detected))
+        speech_frames = sum(1 for _, is_speech in self._onset_window if is_speech)
+        window_full = len(self._onset_window) == self._onset_window.maxlen
+        if not window_full or speech_frames < self._settings.SPEECH_ONSET_RATIO * self._onset_window.maxlen:
+            return
+
+        self._speech_buffer = np.concatenate([frame for frame, _ in self._onset_window])
+        self._onset_window.clear()
+        self._is_speaking = True
+        self._silence_ms = 0
+        self._speech_since_partial = True
+
     def _trim_trailing_silence(self, buffer: np.ndarray, silence_ms: int) -> np.ndarray:
-        """Quita el silencio acumulado al final de la frase antes de transcribirla.
-        """
         trim_ms = silence_ms - self._settings.FINAL_TRAILING_SILENCE_KEEP_MS
         if trim_ms <= 0:
             return buffer
@@ -172,7 +186,6 @@ class StreamingSession:
             self._ready_partial = {"type": "partial", "text": text}
 
     def _lag_ms(self) -> float:
-        """Cuánto va atrasado el procesamiento respecto al audio real recibido."""
         elapsed_ms = (time.monotonic() - self._first_chunk_at) * 1000
         return elapsed_ms - self._processed_audio_ms
 
@@ -182,7 +195,6 @@ class StreamingSession:
             f"transcripcion={transcribe_ms:.0f}ms atraso={lag_ms:.0f}ms"
         )
         if reason == "silencio":
-            # Momento real (reloj) en que terminó la habla: el audio llega en tiempo real.
             speech_end_at = self._first_chunk_at + self._speech_end_audio_ms / 1000
             end_to_final_ms = (time.monotonic() - speech_end_at) * 1000
             line += f" fin_habla->final={end_to_final_ms:.0f}ms"

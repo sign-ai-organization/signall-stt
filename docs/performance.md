@@ -125,3 +125,59 @@ finales sin texto ya no se envían al cliente (siguen en el log).
 - **Picos en parciales diminutos.** Los dos picos más grandes (8426 ms y
   4005 ms) fueron parciales de 0.2 s de audio. Mientras duran, ocupan la
   GPU y retrasan el final siguiente (3237 ms en esta sesión).
+
+---
+
+## 5. Confirmación del inicio de la habla
+
+**Fecha:** 2026-10-01
+**Cambio:** una frase ya no empieza por un solo frame marcado como
+habla. Empieza cuando al menos el 90 % de los últimos 300 ms son habla
+(`SPEECH_ONSET_RATIO`, `SPEECH_ONSET_WINDOW_MS`), y esos 300 ms se
+incluyen en el buffer para no recortar la primera sílaba.
+
+- El texto aparece desde el primer parcial (0.3 s) en casi todas las
+  frases; antes había hasta ~3 s de parciales vacíos al inicio.
+- Sin "frases" largas de solo ruido (una de 0.6 s, descartada).
+- Sin picos de 4–8 s; el mayor fue de ~2 s, en la frase más larga.
+- Los 2 cortes por `buffer_max` fueron de frases realmente largas sin
+  pausa: ya no los provoca el ruido inicial.
+
+**Hallazgo: el filtro `MIN_RMS` sigue perdiendo frases.** Una frase con
+parciales con texto terminó en un final vacío. `transcribe_buffer`
+compara el volumen promedio de todo el buffer contra `MIN_RMS` (0.008).
+Con una voz apenas por encima del umbral, cualquier tramo bajo dentro
+de la frase (pausas, ruido tras hablar) baja el promedio y la frase
+completa se descarta. El recorte del silencio final lo redujo, pero no
+lo resuelve: el problema es usar un promedio.
+
+---
+
+## 6. Filtro de volumen por tramos y precalentamiento del modelo
+
+**Fecha:** 2026-10-01
+**Cambios:**
+- `MIN_RMS` ya no se compara contra el volumen promedio del buffer, sino
+  contra el percentil 90 del volumen de sus tramos de 30 ms
+  (`MIN_RMS_PERCENTILE`): una frase con voz siempre tiene tramos
+  fuertes, aunque tenga pausas.
+- Al arrancar se hace una transcripción de prueba antes de aceptar
+  conexiones (660 ms).
+
+**Resultados:**
+- 9 de 9 frases llegaron con texto, incluida la primera de la sesión.
+- La primera transcripción de la sesión baja de ~1000–1300 ms a 520 ms.
+- Fin de la habla → final: 1850–1957 ms.
+
+**Volúmenes medidos** (percentil 90 por tramo, micrófono del entorno de
+desarrollo):
+
+| Audio | Nivel |
+|---|---|
+| Ruido de fondo | 0.001–0.004 |
+| Voz baja al inicio de la sesión | 0.0086–0.0090 (un tramo en 0.0077) |
+| Voz "pasito" | 0.017–0.022 |
+| Voz normal o fuerte | 0.025–0.06 |
+
+El umbral actual (0.008) queda apenas un 10 % por debajo de la voz más
+baja medida y al doble del ruido: con poco margen hacia la voz.
