@@ -1,5 +1,7 @@
 """Carga del modelo Whisper y transcripción de buffers de audio."""
 
+import time
+
 import numpy as np
 from faster_whisper import WhisperModel
 
@@ -21,12 +23,32 @@ def load_model(settings: Settings) -> WhisperModel:
         raise
 
 
+def warm_up(model: WhisperModel, settings: Settings) -> None:
+    started = time.monotonic()
+    silence = np.zeros(settings.SAMPLE_RATE, dtype=np.float32)
+    segments, _ = model.transcribe(silence, language=settings.LANGUAGE, beam_size=settings.BEAM_SIZE)
+    list(segments)  # transcribe() es perezoso
+    print(f"Modelo precalentado en {(time.monotonic() - started) * 1000:.0f} ms.", flush=True)
+
+
+def _loud_frames_rms(audio_buffer: np.ndarray, settings: Settings) -> float:
+    frame_size = settings.frame_size
+    frame_count = len(audio_buffer) // frame_size
+    if frame_count == 0:
+        return float(np.sqrt(np.mean(audio_buffer ** 2)))
+
+    frames = audio_buffer[: frame_count * frame_size].reshape(frame_count, frame_size)
+    frame_rms = np.sqrt(np.mean(frames ** 2, axis=1))
+    return float(np.percentile(frame_rms, settings.MIN_RMS_PERCENTILE))
+
+
 def transcribe_buffer(model: WhisperModel, audio_buffer: np.ndarray, settings: Settings) -> str:
     if len(audio_buffer) == 0:
         return ""
 
-    rms = float(np.sqrt(np.mean(audio_buffer ** 2)))
-    if rms < settings.MIN_RMS:
+    level = _loud_frames_rms(audio_buffer, settings)
+    if level < settings.MIN_RMS:
+        print(f"[rms] descartado: nivel={level:.4f} umbral={settings.MIN_RMS:.4f}", flush=True)
         return ""
 
     segments, _ = model.transcribe(

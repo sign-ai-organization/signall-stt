@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.session import StreamingSession
-from app.transcriber import load_model, transcribe_buffer
+from app.transcriber import load_model, transcribe_buffer, warm_up
 
 state: dict = {}
 
@@ -18,6 +18,7 @@ state: dict = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     state["model"] = load_model(settings)
+    warm_up(state["model"], settings)
     state["vad"] = webrtcvad.Vad(settings.VAD_AGGRESSIVENESS)
     yield
     state.clear()

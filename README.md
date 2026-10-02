@@ -40,8 +40,9 @@ El servicio queda en `http://localhost:8000`.
 | `DEVICE` | `cuda` | `cuda` o `cpu` |
 | `COMPUTE_TYPE` | `float16` | `float16` (GPU) o `int8` (CPU) |
 | `LANGUAGE` | `es` | Idioma para Whisper |
-| `VAD_AGGRESSIVENESS` | `0` | 0 (permisivo) a 3 (estricto) |
+| `VAD_AGGRESSIVENESS` | `2` | 0 (permisivo) a 3 (estricto) |
 | `SILENCE_TIMEOUT_MS` | `1500` | Silencio para cerrar un segmento |
+| `PARTIAL_INTERVAL_MS` | `400` | Intervalo entre parciales; `0` los desactiva |
 | `MIN_RMS` | `0.008` | Filtro anti-alucinación por energía |
 
 Ver `app/config.py` para la lista completa. Copiá `.env.example` a `.env` para
@@ -76,7 +77,9 @@ Streaming en tiempo real. Protocolo:
 2. El servidor responde con mensajes **JSON de texto** a medida que detecta
    habla:
    - `{"type": "partial", "text": "..."}` — transcripción parcial mientras
-     la persona sigue hablando.
+     la persona sigue hablando. Se calculan en segundo plano, sin frenar
+     el procesamiento del audio, y nunca llegan después del final de su
+     frase. `PARTIAL_INTERVAL_MS=0` los desactiva.
    - `{"type": "final", "text": "..."}` — transcripción final de un
      segmento de habla (silencio detectado o buffer máximo alcanzado).
 3. El cliente puede enviar el texto `"end"` (frame de texto plano, no JSON)
