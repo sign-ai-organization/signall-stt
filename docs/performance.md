@@ -98,3 +98,30 @@ baja el promedio por debajo del umbral. Los parciales no lo sufren
 porque no llevan esa cola de silencio. Algunos "finales vacíos" de las
 entradas 1 y 2 probablemente eran frases perdidas por esta misma causa,
 no solo ruido.
+
+---
+
+## 4. Recorte del silencio final y finales vacíos
+
+**Fecha:** 2026-10-01
+**Cambio:** antes de transcribir el final se recorta el silencio que lo
+cerró, conservando 300 ms (`FINAL_TRAILING_SILENCE_KEEP_MS`). Los
+finales sin texto ya no se envían al cliente (siguen en el log).
+
+- 6 de 6 frases habladas llegaron con texto: ninguna perdida.
+- 3 finales de solo ruido se descartaron sin llegar al cliente.
+- Whisper transcribe menos audio por final (p. ej., 3.8 s → 3.4 s).
+- Fin de la habla → final: 1855–2284 ms en casos normales.
+
+**Hallazgos para el siguiente cambio:**
+
+- **Ruido al inicio de la frase.** El VAD a veces toma un solo frame de
+  ruido como inicio de habla, y el buffer acumula hasta ~3 s de ruido
+  antes de que la persona hable. Efectos: los parciales salen vacíos
+  hasta que la voz domina la energía promedio (el texto tarda en
+  aparecer), el ruido consume parte de los 8 s de `MAX_BUFFER_MS`
+  (cortes antes de tiempo) y aparecen "frases" de solo ruido de hasta
+  7.7 s.
+- **Picos en parciales diminutos.** Los dos picos más grandes (8426 ms y
+  4005 ms) fueron parciales de 0.2 s de audio. Mientras duran, ocupan la
+  GPU y retrasan el final siguiente (3237 ms en esta sesión).

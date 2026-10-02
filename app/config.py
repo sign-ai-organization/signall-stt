@@ -28,6 +28,8 @@ class Settings:
     PARTIAL_INTERVAL_MS: int = _env_int("PARTIAL_INTERVAL_MS", 400)  # 0 = parciales desactivados
     MIN_AUDIO_MS_FOR_PARTIAL: int = _env_int("MIN_AUDIO_MS_FOR_PARTIAL", 200)
     MAX_BUFFER_MS: int = _env_int("MAX_BUFFER_MS", 8000)
+    # Silencio final que se conserva al transcribir el final
+    FINAL_TRAILING_SILENCE_KEEP_MS: int = _env_int("FINAL_TRAILING_SILENCE_KEEP_MS", 300)
 
     BEAM_SIZE: int = _env_int("BEAM_SIZE", 1)
     INITIAL_PROMPT: str | None = os.getenv("INITIAL_PROMPT") or None

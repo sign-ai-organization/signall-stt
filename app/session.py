@@ -37,6 +37,7 @@ class StreamingSession:
         self._speech_end_audio_ms = 0
 
         # Parciales en segundo plano
+        self._utterance_id = 0
         self._partial_task: asyncio.Task | None = None
         self._ready_partial: dict | None = None
         self._speech_since_partial = False
@@ -66,7 +67,7 @@ class StreamingSession:
         if len(self._speech_buffer) == 0:
             return None
 
-        buffer_copy = self._speech_buffer
+        buffer_copy = self._trim_trailing_silence(self._speech_buffer, self._silence_ms)
         self._speech_buffer = np.zeros(0, dtype=np.float32)
         self._is_speaking = False
         self._silence_ms = 0
@@ -106,18 +107,19 @@ class StreamingSession:
         )
         if do_final:
             reason = "silencio" if self._silence_ms >= self._settings.SILENCE_TIMEOUT_MS else "buffer_max"
-            buffer_copy = self._speech_buffer
+            buffer_copy = self._trim_trailing_silence(self._speech_buffer, self._silence_ms)
             self._speech_buffer = np.zeros(0, dtype=np.float32)
             self._is_speaking = False
             self._silence_ms = 0
             self._close_utterance()
 
+            transcribed_ms = len(buffer_copy) / self._settings.SAMPLE_RATE * 1000
             lag_ms = self._lag_ms()
             started = time.monotonic()
             text = await asyncio.to_thread(transcribe_buffer, self._model, buffer_copy, self._settings)
             transcribe_ms = (time.monotonic() - started) * 1000
-            self._log_final(reason, buffer_ms, transcribe_ms, lag_ms)
-            return {"type": "final", "text": text}
+            self._log_final(reason, transcribed_ms, transcribe_ms, lag_ms)
+            return {"type": "final", "text": text} if text else None
 
         do_partial = (
             self._settings.PARTIAL_INTERVAL_MS > 0
@@ -134,6 +136,15 @@ class StreamingSession:
             )
 
         return None
+
+    def _trim_trailing_silence(self, buffer: np.ndarray, silence_ms: int) -> np.ndarray:
+        """Quita el silencio acumulado al final de la frase antes de transcribirla.
+        """
+        trim_ms = silence_ms - self._settings.FINAL_TRAILING_SILENCE_KEEP_MS
+        if trim_ms <= 0:
+            return buffer
+        trim_samples = int(self._settings.SAMPLE_RATE * trim_ms / 1000)
+        return buffer[:-trim_samples]
 
     def _close_utterance(self) -> None:
         self._utterance_id += 1
