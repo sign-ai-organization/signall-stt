@@ -27,6 +27,7 @@ class StreamingSession:
 
         self._pcm_buffer = bytearray()
         self._speech_buffer = np.zeros(0, dtype=np.float32)
+        self._frame_flags: list[bool] = []
         self._is_speaking = False
         self._silence_ms = 0
         self._last_partial_time = time.time()
@@ -70,10 +71,7 @@ class StreamingSession:
             return None
 
         buffer_copy = self._trim_trailing_silence(self._speech_buffer, self._silence_ms)
-        self._speech_buffer = np.zeros(0, dtype=np.float32)
-        self._is_speaking = False
-        self._silence_ms = 0
-        self._close_utterance()
+        self._end_speech()
 
         text = await asyncio.to_thread(transcribe_buffer, self._model, buffer_copy, self._settings)
         return {"type": "final", "text": text} if text else None
@@ -83,9 +81,11 @@ class StreamingSession:
         frame_float = frame_int16.astype(np.float32) / 32768.0
 
         try:
-            speech_detected = self._vad.is_speech(frame_bytes, self._settings.SAMPLE_RATE)
+            vad_speech = self._vad.is_speech(frame_bytes, self._settings.SAMPLE_RATE)
         except Exception:
-            speech_detected = False
+            vad_speech = False
+        frame_rms = float(np.sqrt(np.mean(frame_float ** 2)))
+        speech_detected = vad_speech and frame_rms >= self._settings.MIN_RMS
 
         self._processed_audio_ms += self._settings.FRAME_DURATION_MS
 
@@ -93,12 +93,14 @@ class StreamingSession:
             self._detect_speech_onset(frame_float, speech_detected)
         elif speech_detected:
             self._speech_buffer = np.concatenate([self._speech_buffer, frame_float])
+            self._frame_flags.append(True)
             self._silence_ms = 0
             self._speech_since_partial = True
         else:
             if self._silence_ms == 0:
                 self._speech_end_audio_ms = self._processed_audio_ms - self._settings.FRAME_DURATION_MS
             self._speech_buffer = np.concatenate([self._speech_buffer, frame_float])
+            self._frame_flags.append(False)
             self._silence_ms += self._settings.FRAME_DURATION_MS
 
         buffer_ms = len(self._speech_buffer) / self._settings.SAMPLE_RATE * 1000
@@ -109,13 +111,7 @@ class StreamingSession:
             or buffer_ms >= self._settings.MAX_BUFFER_MS
         )
         if do_final:
-            reason = "silencio" if self._silence_ms >= self._settings.SILENCE_TIMEOUT_MS else "buffer_max"
-            buffer_copy = self._trim_trailing_silence(self._speech_buffer, self._silence_ms)
-            self._speech_buffer = np.zeros(0, dtype=np.float32)
-            self._is_speaking = False
-            self._silence_ms = 0
-            self._close_utterance()
-
+            buffer_copy, reason = self._take_final_audio()
             transcribed_ms = len(buffer_copy) / self._settings.SAMPLE_RATE * 1000
             lag_ms = self._lag_ms()
             started = time.monotonic()
@@ -148,10 +144,54 @@ class StreamingSession:
             return
 
         self._speech_buffer = np.concatenate([frame for frame, _ in self._onset_window])
+        self._frame_flags = [is_speech for _, is_speech in self._onset_window]
         self._onset_window.clear()
         self._is_speaking = True
         self._silence_ms = 0
         self._speech_since_partial = True
+
+    def _take_final_audio(self) -> tuple[np.ndarray, str]:
+        if self._silence_ms >= self._settings.SILENCE_TIMEOUT_MS:
+            audio = self._trim_trailing_silence(self._speech_buffer, self._silence_ms)
+            self._end_speech()
+            return audio, "silencio"
+
+        cut_frame = self._find_pause_cut()
+        if cut_frame is None:
+            audio = self._speech_buffer
+            self._end_speech()
+            return audio, "buffer_max_forzado"
+
+        # La frase sigue en curso: lo que va después de la pausa inicia la siguiente.
+        cut_sample = cut_frame * self._settings.frame_size
+        audio = self._speech_buffer[:cut_sample]
+        self._speech_buffer = self._speech_buffer[cut_sample:]
+        self._frame_flags = self._frame_flags[cut_frame:]
+        self._close_utterance()
+        self._speech_since_partial = True
+        return audio, "buffer_max_pausa"
+
+    def _find_pause_cut(self) -> int | None:
+        min_pause_frames = max(1, self._settings.CUT_PAUSE_MIN_MS // self._settings.FRAME_DURATION_MS)
+        earliest = len(self._frame_flags) // 2
+        i = len(self._frame_flags) - 1
+        while i >= earliest:
+            if self._frame_flags[i]:
+                i -= 1
+                continue
+            pause_end = i
+            while i >= earliest and not self._frame_flags[i]:
+                i -= 1
+            if pause_end - i >= min_pause_frames:
+                return (i + 1 + pause_end + 1) // 2
+        return None
+
+    def _end_speech(self) -> None:
+        self._speech_buffer = np.zeros(0, dtype=np.float32)
+        self._frame_flags = []
+        self._is_speaking = False
+        self._silence_ms = 0
+        self._close_utterance()
 
     def _trim_trailing_silence(self, buffer: np.ndarray, silence_ms: int) -> np.ndarray:
         trim_ms = silence_ms - self._settings.FINAL_TRAILING_SILENCE_KEEP_MS

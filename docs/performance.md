@@ -181,3 +181,35 @@ desarrollo):
 
 El umbral actual (0.008) queda apenas un 10 % por debajo de la voz más
 baja medida y al doble del ruido: con poco margen hacia la voz.
+
+---
+
+## 7. Cortes en pausas y ruido que mantenía frases abiertas
+
+**Fecha:** 2026-10-01
+**Cambios:**
+- Al llegar a `MAX_BUFFER_MS`, la frase se corta en la pausa más
+  reciente de al menos `CUT_PAUSE_MIN_MS` (150 ms) en la segunda mitad
+  del buffer, y el audio posterior sigue como la frase en curso. Si no
+  hay pausa, se corta en el límite como antes.
+- Un frame cuenta como habla solo si el VAD lo marca y su volumen
+  alcanza `MIN_RMS`.
+
+**Problema que se encontró al probar el primer cambio:** el VAD seguía
+marcando el ruido de fondo (0.0016–0.0035) como habla después de que la
+persona se callaba. El contador de silencio se reiniciaba, la frase no
+se cerraba y el buffer se llenaba de ruido hasta el límite; con tan poca
+voz en el buffer, el filtro del final la descartaba. Se perdieron varias
+frases, entre ellas "Hola, ¿cómo estás?". En el cliente se veía como si
+la frase siguiente "reemplazara" a la anterior.
+
+| | Solo corte en pausas | Con filtro de energía por frame |
+|---|---:|---:|
+| Frases perdidas | varias | 0 de 9 |
+| Frases mantenidas abiertas por ruido | 3 | 0 |
+| Cortes en pausa / forzados | 5 / 3 | 2 / 0 |
+| Fin de la habla → final | — | 1813–2099 ms |
+
+**Observación:** en una frase se perdió un "No" inicial corto, probablemente
+porque quedó fuera de la ventana de confirmación del inicio. Ocurrió una
+vez; si se repite, se ajusta con `SPEECH_ONSET_WINDOW_MS`.

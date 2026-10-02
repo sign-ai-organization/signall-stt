@@ -28,6 +28,8 @@ class Settings:
     PARTIAL_INTERVAL_MS: int = _env_int("PARTIAL_INTERVAL_MS", 400)  # 0 = parciales desactivados
     MIN_AUDIO_MS_FOR_PARTIAL: int = _env_int("MIN_AUDIO_MS_FOR_PARTIAL", 200)
     MAX_BUFFER_MS: int = _env_int("MAX_BUFFER_MS", 8000)
+    # Pausa mínima donde se corta una frase que llega a MAX_BUFFER_MS
+    CUT_PAUSE_MIN_MS: int = _env_int("CUT_PAUSE_MIN_MS", 150)
     # Inicio de habla: ventana reciente y proporción mínima de frames con habla
     SPEECH_ONSET_WINDOW_MS: int = _env_int("SPEECH_ONSET_WINDOW_MS", 300)
     SPEECH_ONSET_RATIO: float = _env_float("SPEECH_ONSET_RATIO", 0.9)
