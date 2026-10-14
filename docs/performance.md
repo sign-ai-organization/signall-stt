@@ -216,7 +216,7 @@ vez; si se repite, se ajusta con `SPEECH_ONSET_WINDOW_MS`.
 
 ---
 
-## 8. Perfil de tiempo real (rama `tiempo-real`)
+## 8. Perfil de tiempo real
 
 **Fecha:** 2026-10-14
 **GTX/RTX 4050**, Whisper `medium` (finales) + `small` (parciales), CUDA float16.
