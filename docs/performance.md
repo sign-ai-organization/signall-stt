@@ -213,3 +213,114 @@ la frase siguiente "reemplazara" a la anterior.
 **Observación:** en una frase se perdió un "No" inicial corto, probablemente
 porque quedó fuera de la ventana de confirmación del inicio. Ocurrió una
 vez; si se repite, se ajusta con `SPEECH_ONSET_WINDOW_MS`.
+
+---
+
+## 8. Perfil de tiempo real (rama `tiempo-real`)
+
+**Fecha:** 2026-10-14
+**GTX/RTX 4050**, Whisper `medium` (finales) + `small` (parciales), CUDA float16.
+
+El objetivo dejó de ser "optimizar una espera" y pasó a ser que la app
+firme **mientras la persona habla**. Eso cambió el perfil entero.
+
+| | Antes | Ahora |
+|---|---:|---:|
+| Fin del habla → transcripción final | 1813 – 2099 ms | **p50 839 / p95 958 / max 1093 ms** |
+| Inferencia de un parcial | 350 – 630 ms | **p50 92 / p95 172 ms** |
+| Inferencia de un final | 246 – 332 ms | p50 249 / p95 338 ms |
+| Espera por la GPU | picos de 4 – 8 s | **p50 0.4 / p95 0.8 ms** |
+| Audio acumulado sin procesar | — | p50 −21 ms (sin acumulación) |
+| Costo del VAD por frame | — | p50 0.07 ms |
+
+Medido sobre los 28 fixtures de `scripts/make_audio_fixtures.py`,
+reproducidos a velocidad real por el WebSocket del backend.
+
+### Descomposición del fin del habla al final
+
+| Término | Antes | Ahora | Por qué |
+|---|---:|---:|---|
+| Hangover de silencio | 1500 ms | **600 ms** | `SILENCE_TIMEOUT_MS`. El piso por debajo del cual una pausa natural entre palabras parte la frase. |
+| Ventana de onset | 300 ms | **150 ms** | `SPEECH_ONSET_WINDOW_MS`. Son 150 ms en los que no existe siquiera un buffer del cual sacar un parcial. |
+| Inferencia | 350 – 630 ms | **249 – 338 ms** | Whisper siempre paga su ventana de 30 s, complete o no el buffer. |
+
+### `InferenceScheduler`
+
+El descubrimiento que lo justificó: **CTranslate2 serializa igual** por
+abajo (`num_workers=1`), así que sin un orden explícito el orden de
+ejecución es el de llegada. Un parcial despachado 100 ms antes que un
+final se ejecuta primero, y el usuario espera los dos. La entrada 4 de
+este documento ya medía picos de 4 a 8 s.
+
+La solución no es más concurrencia sino **orden**: una cola priorizada
+donde `PRIORITY_FINAL` salta a los parciales que todavía no empezaron. El
+parcial que ya está usando la GPU se deja terminar — cancelarlo a mitad
+cuesta una GPU desperdiciada y no ahorra nada.
+
+Resultado: `stt_partial_queue_ms` pasó de picos de 4 – 8 s a p95 0.8 ms.
+
+### Dos modelos
+
+| Modelo | Uso | Inferencia |
+|---|---|---:|
+| `small` | parciales | p50 92 ms |
+| `medium` | finales | p50 249 ms |
+
+Un parcial se tira a la basura en cuanto llega el final, así que no
+necesita la precisión de `medium`. `PARTIAL_MODEL_SIZE` vacío (o igual a
+`MODEL_SIZE`) deja un solo modelo, que es lo que se hacía antes y lo que
+corresponde si la VRAM no alcanza para dos.
+
+Precalentado: 96 ms el modelo de parciales, 488 ms el de finales. Se hace
+en el arranque, en el hilo del lifespan, para que la primera frase real no
+pague la compilación de kernels de CUDA.
+
+### El filtro que se comía audio real
+
+`AVG_LOGPROB_THRESHOLD` estaba en `-0.8`, más estricto que el default de
+Whisper (`-1.0`). Medido sobre los fixtures, hacía que **"cómo estás" y
+"estoy triste" salieran como transcripción vacía**, aunque el modelo las
+había transcrito bien por `POST /transcribe`. Un final vacío es
+indistinguible de un micrófono roto, que es exactamente la clase de
+fallo que hace perder el tiempo de un agente.
+
+Volvió a `-1.0`, y `transcribe_buffer` ahora devuelve `drop_reason` para
+que un vacío se pueda explicar: `rms` (audio en silencio), `no_speech`
+(el modelo lo considera silencio) o `logprob` (confianza baja).
+
+Mirar `stt_dropped_total{reason="logprob"}` en `/metrics` es el guard: si
+sube, el filtro se está comiendo audio transcrito correctamente.
+
+### Timestamps por palabra
+
+Cada parcial y final lleva ahora `words: [{w, s, e}]` y `audio_ms`. No
+es un detalle del protocolo: es lo que le permite al backend decidir qué
+palabra ya terminó de decirse en vez de tener que suponer "todo menos la
+última".
+
+Costo medido: despreciable. El alineamiento con atención cruzada ya está
+en la pasada de decodificación.
+
+### El buffer O(n²)
+
+El buffer de habla concatenaba el frame de 30 ms contra el arreglo
+completo en cada frame: para 8 s de utterances son ~270 concatenaciones de
+un arreglo que llega a 128k muestras, unos 68 MB de memcpy, **todo en el
+hilo del bucle de eventos**. Ese hilo es compartido por todas las
+conexiones, así que una sesión saturada retrasaba la VAD de las demás.
+
+Ahora acumula en una lista y junta una sola vez, al transcribir. El costo
+medido del VAD por frame (0.07 ms) confirma que ya no hay trabajo pesado
+en el bucle.
+
+### Pendiente
+
+- **Varias sesiones simultáneas.** Todo se midió con una. Con varias
+  comparten la GPU y el scheduler las serializa, así que el tiempo por
+  cliente sube linealmente. Con `medium` (1.5 GB de VRAM) entran bien
+  varias en una GPU de 6 GB.
+- **`PARTIAL_MODEL_SIZE=base` o `tiny`.** Aún más rápido, a costa de
+  parciales bastante más ruidosos. No se midió.
+- **Cancelar un parcial en vuelo.** Se hace cuando el utterance cierra,
+  pero solo descarta el resultado: el hilo de la GPU sigue hasta que
+  CTranslate2 termina, porque ahí no se puede interrumpir a mitad.
