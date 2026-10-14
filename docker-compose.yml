@@ -5,17 +5,32 @@ services:
       - "8000:8000"
     environment:
       MODEL_SIZE: ${MODEL_SIZE:-medium}
+      # Modelo mas chico para los parciales: se tira a la basura en cuanto llega
+      # el final, asi que no necesita la misma precision. Vacio = usar MODEL_SIZE.
+      PARTIAL_MODEL_SIZE: ${PARTIAL_MODEL_SIZE:-small}
+      PARTIAL_COMPUTE_TYPE: ${PARTIAL_COMPUTE_TYPE:-float16}
       DEVICE: ${DEVICE:-cuda}
       COMPUTE_TYPE: ${COMPUTE_TYPE:-float16}
       LANGUAGE: ${LANGUAGE:-es}
       NO_SPEECH_THRESHOLD: ${NO_SPEECH_THRESHOLD:-0.6}
-      AVG_LOGPROB_THRESHOLD: ${AVG_LOGPROB_THRESHOLD:--0.8}
+      AVG_LOGPROB_THRESHOLD: ${AVG_LOGPROB_THRESHOLD:--1.0}
       MIN_RMS: ${MIN_RMS:-0.008}
       VAD_AGGRESSIVENESS: ${VAD_AGGRESSIVENESS:-2}
-      SILENCE_TIMEOUT_MS: ${SILENCE_TIMEOUT_MS:-1500}
-      PARTIAL_INTERVAL_MS: ${PARTIAL_INTERVAL_MS:-400}
+      SILENCE_TIMEOUT_MS: ${SILENCE_TIMEOUT_MS:-600}
+      PARTIAL_INTERVAL_MS: ${PARTIAL_INTERVAL_MS:-250}
+      MIN_AUDIO_MS_FOR_PARTIAL: ${MIN_AUDIO_MS_FOR_PARTIAL:-160}
+      SPEECH_ONSET_WINDOW_MS: ${SPEECH_ONSET_WINDOW_MS:-150}
+      SPEECH_ONSET_RATIO: ${SPEECH_ONSET_RATIO:-0.7}
+      FINAL_TRAILING_SILENCE_KEEP_MS: ${FINAL_TRAILING_SILENCE_KEEP_MS:-120}
+      MAX_BUFFER_MS: ${MAX_BUFFER_MS:-8000}
+      WORD_TIMESTAMPS: ${WORD_TIMESTAMPS:-true}
+      MAX_CONCURRENT_INFERENCE: ${MAX_CONCURRENT_INFERENCE:-1}
     volumes:
       - hf-cache:/root/.cache/huggingface
+      # Los fixtures de `scripts/make_audio_fixtures.py` se montan de solo
+      # lectura para que las pruebas de latencia puedan reproducirlos sin
+      # rebuild de la imagen.
+      - ./fixtures:/fixtures:ro
     # Requiere NVIDIA Container Toolkit (o Docker Desktop con soporte GPU habilitado).
     # Si no tenés GPU, borrá este bloque y poné DEVICE=cpu / COMPUTE_TYPE=int8 arriba;
     # igual hay fallback automático a CPU si la GPU falla al cargar el modelo.
