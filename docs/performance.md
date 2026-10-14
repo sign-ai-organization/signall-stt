@@ -324,3 +324,35 @@ en el bucle.
 - **Cancelar un parcial en vuelo.** Se hace cuando el utterance cierra,
   pero solo descarta el resultado: el hilo de la GPU sigue hasta que
   CTranslate2 termina, porque ahí no se puede interrumpir a mitad.
+
+### Corrección: `stt_partial_lag_ms` medía algo que no era atraso
+
+**Fecha:** 2026-10-14, tarde. Found it en la primera prueba con voz real.
+
+La métrica era `tiempo real desde el primer frame − audio recibido`. Suena a
+saturación pero mezcla dos cosas sin relación: si el cliente **deja de mandar
+audio** (apagó el micrófono, cerró la app, se cortó el cable), el reloj sigue
+corriendo y el audio no, así que el número crece sin que haya nada que
+procesar. En la prueba con voz real, p95 = 13091 ms y max = 27332 ms eran casi
+todos segundos de micrófono apagado. Reproducir un fixture salía **negativo**
+(−27 ms), porque el replay manda más rápido que tiempo real.
+
+Ahora es *audio recibido menos el que ya estaba en el buffer cuando arrancó la
+inferencia*, con la foto tomada en `_transcribe()` — cuando la inferencia
+**empieza**, no cuando se despacha, porque la espera por la GPU ya la mide
+`stt_partial_queue_ms` y sumarlas las dos contaría el atraso dos veces.
+
+| | Antes (con voz real) | Ahora (28 fixtures) |
+|---|---:|---:|
+| `stt_partial_lag_ms` p50 | 1.4 ms | 360 ms |
+| `stt_partial_lag_ms` p95 | 13091 ms | 390 ms |
+| `stt_partial_lag_ms` max | 27332 ms | 630 ms |
+
+Los 360 ms de p50 son los ~250 ms que tarda `medium` en un final y ~90 ms en un
+parcial de `small`: el audio real que entra mientras Whisper trabaja. Es el piso
+físico del costo de una inferencia, no un problema. Si esta métrica sube de ahí,
+el culpable es el modelo o la cola, y `stt_inference_ms` /
+`stt_partial_queue_ms` dicen cuál.
+
+`_processed_audio_ms` pasó a llamarse `_received_audio_ms`: nunca procesó nada,
+era la posición del audio en la línea de tiempo.

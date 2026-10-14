@@ -71,7 +71,10 @@ class StreamingSession:
         self._last_partial_time = time.monotonic()
 
         self._first_chunk_at: float | None = None
-        self._processed_audio_ms = 0
+        self._received_audio_ms = 0
+        # Foto del audio recibido en el instante en que arrancó la última
+        # inferencia. Es la referencia de `_lag_ms`.
+        self._backlog_snapshot_ms: float | None = None
         self._speech_end_audio_ms = 0
 
         onset_frames = max(1, settings.SPEECH_ONSET_WINDOW_MS // settings.FRAME_DURATION_MS)
@@ -139,7 +142,7 @@ class StreamingSession:
             frame_rms = float(np.sqrt(np.mean(frame_float ** 2)))
         speech_detected = vad_speech and frame_rms >= self._settings.MIN_RMS
 
-        self._processed_audio_ms += self._settings.FRAME_DURATION_MS
+        self._received_audio_ms += self._settings.FRAME_DURATION_MS
 
         if not self._is_speaking:
             self._detect_speech_onset(frame_float, speech_detected)
@@ -150,7 +153,7 @@ class StreamingSession:
             self._speech_since_partial = True
         else:
             if self._silence_ms == 0:
-                self._speech_end_audio_ms = self._processed_audio_ms - self._settings.FRAME_DURATION_MS
+                self._speech_end_audio_ms = self._received_audio_ms - self._settings.FRAME_DURATION_MS
             self._append_speech(frame_float)
             self._frame_flags.append(False)
             self._silence_ms += self._settings.FRAME_DURATION_MS
@@ -298,6 +301,11 @@ class StreamingSession:
     async def _transcribe(self, audio: np.ndarray, priority: int, kind: str) -> TranscriptionResult:
         model_key = "partial" if kind == "partial" and "partial" in self._models else "final"
         model = self._models[model_key]
+        # La foto se toma acá, cuando la inferencia **empieza** a correr, y no
+        # cuando se despacha: la espera por la GPU ya la mide
+        # `stt_partial_queue_ms`, y sumar las dos sería contar el atraso dos
+        # veces.
+        self._backlog_snapshot_ms = self._received_audio_ms
         return await self._scheduler.run(
             priority,
             transcribe_buffer,
@@ -352,16 +360,28 @@ class StreamingSession:
     # -------------------------------------------------------------- metricas
 
     def _lag_ms(self) -> float:
-        """Audio recibido menos audio ya procesado.
+        """Cuánto audio llegó mientras se transcribía y todavía no se transcribió.
 
-        Es la unica medida honesta de saturacion: si la GPU no da abasto, este
-        numero sube y el usuario empieza a notar que el avatar va "atrasado"
-        respecto a su voz.
+        Es la única medida honesta de saturación, y la definición importa: **audio
+        recibido menos el audio que ya estaba en el buffer cuando empezó la
+        inferencia**.
+
+        Antes se medía contra el reloj de la sesión (tiempo real desde el primer
+        frame menos audio recibido), lo que mezclaba dos cosas sin relación: con
+        el micrófono apagado 20 s el número llegaba a 20000 ms y parecía una GPU
+        saturada, cuando en realidad no estaba llegando nada que procesar. Y al
+        reproducir más rápido que tiempo real salía negativo. En una prueba con
+        voz real, p95=13091 y max=27332 eran casi todos segundos de micrófono
+        apagado, no atraso.
+
+        Ahora mide lo único que importa: si el avatar va "atrás" respecto de la
+        voz. Cero significa que la transcripción le gana al habla; si sube, la
+        GPU o el modelo no dan abasto y hay que mirar `stt_inference_ms` y
+        `stt_partial_queue_ms` para saber cuál de los dos.
         """
-        if self._first_chunk_at is None:
+        if self._backlog_snapshot_ms is None:
             return 0.0
-        elapsed_ms = (time.monotonic() - self._first_chunk_at) * 1000
-        return elapsed_ms - self._processed_audio_ms
+        return max(0.0, self._received_audio_ms - self._backlog_snapshot_ms)
 
     def _log_final(self, reason: str, result: TranscriptionResult, lag_ms: float) -> None:
         line = (

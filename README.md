@@ -160,10 +160,17 @@ curl -s 127.0.0.1:8000/metrics.json         # lo mismo estructurado
 |---|---|---|
 | `stt_end_to_final_ms` | dejar de hablar → final disponible | p50 839 / p95 958 ms |
 | `stt_inference_ms{model=…}` | inferencia por modelo | `small` p50 92 ms, `medium` p50 249 ms |
-| `stt_partial_queue_ms` | **espera por la GPU**. Antes daba picos de 4–8 s. | p50 0.4 / p95 0.8 ms |
-| `stt_partial_lag_ms` | audio recibido sin procesar. Sube = saturación. | p50 −21 ms |
+| `stt_partial_queue_ms` | **espera por la GPU**. Antes daba picos de 4–8 s. | p50 0.4 / p95 0.6 ms |
+| `stt_partial_lag_ms` | **atraso real**: audio que llegó mientras se transcribía y todavía no está transcrito. Sube = el avatar va detrás de la voz. | p50 360 / p95 390 ms |
 | `stt_vad_ms` | costo del VAD por frame de 30 ms | p50 0.07 ms |
 | `stt_dropped_total{reason=…}` | transiciones descartadas | `rms`, `no_speech`, `logprob` |
+
+`stt_partial_lag_ms` **no** es "reloj de sesión menos audio recibido", aunque el
+nombre lo sugiera. Es *audio recibido menos el que ya estaba en el buffer cuando
+arrancó la inferencia*. La diferencia importa: con la otra definición, 20 s de
+micrófono apagado daban 20000 ms y se leían como "GPU saturada" cuando no estaba
+llegando nada que procesar. En la primera prueba con voz real, p95 = 13091 ms y
+max = 27332 ms eran casi todos segundos de micrófono apagado.
 
 `reason="logprob"` merece atención: cuenta audio que Whisper transcribió
 **bien** y el filtro de confianza tiró igual. Con `AVG_LOGPROB_THRESHOLD`
