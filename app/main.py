@@ -126,9 +126,11 @@ async def ws_transcribe(websocket: WebSocket):
                 for result in await session.feed(data):
                     await websocket.send_json(result)
             elif text_msg is not None and text_msg.strip().lower() == "end":
-                result = await session.flush()
-                if result:
-                    await websocket.send_json(result)
+                # `flush` responde siempre, vacío incluido: el cliente pidió
+                # cerrar el utterance, y un `end` sin respuesta lo deja
+                # esperando una transcripción que no iba a llegar nunca (ver
+                # `StreamingSession.flush`).
+                await websocket.send_json(await session.flush())
     except WebSocketDisconnect:
         pass
     finally:

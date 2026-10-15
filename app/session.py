@@ -106,23 +106,43 @@ class StreamingSession:
 
         return results
 
-    async def flush(self) -> dict | None:
-        """Cierra el utterance actual por pedido explicito del cliente.
+    async def flush(self) -> dict:
+        """Cierra el utterance actual por pedido explícito del cliente.
 
-        Es el atajo de baja latencia: el cliente (el boton del microfono)
-        avisa que solto y se salta el hangover de silencio. Sin esto, soltar el
-        microfono a mitad de frase obligaba a esperar `SILENCE_TIMEOUT_MS` a un
+        Es el atajo de baja latencia: el cliente (el botón del micrófono) avisa
+        que soltó y se salta el hangover de silencio. Sin esto, soltar el
+        micrófono a mitad de frase obligaba a esperar `SILENCE_TIMEOUT_MS` a un
         silencio que ya no iba a llegar.
+
+        **Este es el único camino que responde siempre**, vacío incluido, porque
+        es el único en el que el cliente preguntó. Los dos casos por los que
+        antes se callaba son los dos casos normales de soltar el micrófono:
+
+        - El filtro de descarte se comió el audio (`no_speech`, `logprob`,
+          `rms`). Es lo que pasa al soltar el micrófono sobre ruido: la frase se
+          cerró y no tenía palabras, y eso es una respuesta.
+        - Ya no queda audio pendiente porque el silencio la cerró antes. El `end`
+          del cliente llega tarde, no en balde.
+
+        Antes, en los dos casos, no salía nada y quien se quedaba esperando era el
+        cliente: su red de seguridad ("no llegó la transcripción") reportaba como
+        perdida una frase que nunca existió. Un final vacío es una respuesta
+        válida y el backend ya la reenvía tal cual.
+
+        El camino por silencio (`feed`) sigue descartando los vacíos: ahí nadie
+        está preguntando y mandarlos sería ruido en la conexión.
         """
         if self._speech_samples == 0:
-            return None
+            result = TranscriptionResult("", drop_reason="empty")
+            self._log_final("flush", result, self._lag_ms())
+            return result.to_payload("final")
 
         buffer_copy = self._trim_trailing_silence(self._speech_audio(), self._silence_ms)
         self._end_speech()
 
         result = await self._transcribe(buffer_copy, priority=PRIORITY_FINAL)
         self._log_final("flush", result, self._lag_ms())
-        return result.to_payload("final") if result.text else None
+        return result.to_payload("final")
 
     # -------------------------------------------------------------uttokens
 
