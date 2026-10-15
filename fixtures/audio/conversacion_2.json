@@ -1,0 +1,49 @@
+{
+  "id": "conversacion_2",
+  "text": "me llamo ana, vivo en bogota, soy estudiante",
+  "duration_ms": 5688,
+  "sample_rate": 16000,
+  "pause_ms": 0,
+  "words": [
+    {
+      "word": "me",
+      "start_ms": 0,
+      "end_ms": 271
+    },
+    {
+      "word": "llamo",
+      "start_ms": 271,
+      "end_ms": 542
+    },
+    {
+      "word": "ana,",
+      "start_ms": 542,
+      "end_ms": 814
+    },
+    {
+      "word": "vivo",
+      "start_ms": 814,
+      "end_ms": 1086
+    },
+    {
+      "word": "en",
+      "start_ms": 1086,
+      "end_ms": 1358
+    },
+    {
+      "word": "bogota,",
+      "start_ms": 1358,
+      "end_ms": 1629
+    },
+    {
+      "word": "soy",
+      "start_ms": 1629,
+      "end_ms": 1901
+    },
+    {
+      "word": "estudiante",
+      "start_ms": 1901,
+      "end_ms": 2173
+    }
+  ]
+}

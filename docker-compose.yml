@@ -9,13 +9,33 @@ services:
       COMPUTE_TYPE: ${COMPUTE_TYPE:-float16}
       LANGUAGE: ${LANGUAGE:-es}
       NO_SPEECH_THRESHOLD: ${NO_SPEECH_THRESHOLD:-0.6}
-      AVG_LOGPROB_THRESHOLD: ${AVG_LOGPROB_THRESHOLD:--0.8}
+      # Default de Whisper. No subir a -0.8: descarta audio que el modelo
+      # transcribió bien (medido sobre los fixtures: "cómo estás", "estoy triste").
+      AVG_LOGPROB_THRESHOLD: ${AVG_LOGPROB_THRESHOLD:--1.0}
       MIN_RMS: ${MIN_RMS:-0.008}
       VAD_AGGRESSIVENESS: ${VAD_AGGRESSIVENESS:-2}
+      # Los seis valores de abajo son los del diagrama 6.3 del SDD y los mismos
+      # que `app/config.py`. Están explícitos a propósito: son los que se
+      # cambiaron para el perfil de tiempo real del 14 de octubre, y dejarlos a
+      # a la vista es lo que evita volver a cambiarlos por sorpresa.
       SILENCE_TIMEOUT_MS: ${SILENCE_TIMEOUT_MS:-1500}
       PARTIAL_INTERVAL_MS: ${PARTIAL_INTERVAL_MS:-400}
+      MIN_AUDIO_MS_FOR_PARTIAL: ${MIN_AUDIO_MS_FOR_PARTIAL:-200}
+      SPEECH_ONSET_WINDOW_MS: ${SPEECH_ONSET_WINDOW_MS:-300}
+      SPEECH_ONSET_RATIO: ${SPEECH_ONSET_RATIO:-0.9}
+      FINAL_TRAILING_SILENCE_KEEP_MS: ${FINAL_TRAILING_SILENCE_KEEP_MS:-300}
+      MAX_BUFFER_MS: ${MAX_BUFFER_MS:-8000}
+      # Nadie lee los timestamps por palabra: existían para el camino que
+      # firmaba por fragmentos. Ver la nota de `WORD_TIMESTAMPS` en
+      # `app/config.py` antes de prenderlo.
+      WORD_TIMESTAMPS: ${WORD_TIMESTAMPS:-false}
+      MAX_CONCURRENT_INFERENCE: ${MAX_CONCURRENT_INFERENCE:-1}
     volumes:
       - hf-cache:/root/.cache/huggingface
+      # Los fixtures de `scripts/make_audio_fixtures.py` se montan de solo
+      # lectura para que las pruebas se puedan reproducir sin rebuild de la
+      # imagen. Los `.wav` no están en git (ver `.gitignore`).
+      - ./fixtures:/fixtures:ro
     # Requiere NVIDIA Container Toolkit (o Docker Desktop con soporte GPU habilitado).
     # Si no tenés GPU, borrá este bloque y poné DEVICE=cpu / COMPUTE_TYPE=int8 arriba;
     # igual hay fallback automático a CPU si la GPU falla al cargar el modelo.

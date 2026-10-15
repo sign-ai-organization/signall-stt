@@ -1,0 +1,24 @@
+{
+  "id": "muchas_personas",
+  "text": "cuantas personas son",
+  "duration_ms": 2491,
+  "sample_rate": 16000,
+  "pause_ms": 0,
+  "words": [
+    {
+      "word": "cuantas",
+      "start_ms": 0,
+      "end_ms": 317
+    },
+    {
+      "word": "personas",
+      "start_ms": 317,
+      "end_ms": 634
+    },
+    {
+      "word": "son",
+      "start_ms": 634,
+      "end_ms": 951
+    }
+  ]
+}

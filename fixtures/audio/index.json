@@ -1,0 +1,647 @@
+{
+  "count": 28,
+  "clips": [
+    {
+      "id": "hola",
+      "text": "hola",
+      "duration_ms": 529,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "hola",
+          "start_ms": 0,
+          "end_ms": 201
+        }
+      ]
+    },
+    {
+      "id": "gracias",
+      "text": "gracias",
+      "duration_ms": 1234,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "gracias",
+          "start_ms": 0,
+          "end_ms": 471
+        }
+      ]
+    },
+    {
+      "id": "bien",
+      "text": "bien bien",
+      "duration_ms": 1300,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "bien",
+          "start_ms": 0,
+          "end_ms": 248
+        },
+        {
+          "word": "bien",
+          "start_ms": 248,
+          "end_ms": 496
+        }
+      ]
+    },
+    {
+      "id": "nombre",
+      "text": "nombre",
+      "duration_ms": 970,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "nombre",
+          "start_ms": 0,
+          "end_ms": 370
+        }
+      ]
+    },
+    {
+      "id": "buenos_dias",
+      "text": "buenos dias",
+      "duration_ms": 1455,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "buenos",
+          "start_ms": 0,
+          "end_ms": 277
+        },
+        {
+          "word": "dias",
+          "start_ms": 277,
+          "end_ms": 555
+        }
+      ]
+    },
+    {
+      "id": "buenas_tardes",
+      "text": "buenas tardes",
+      "duration_ms": 1609,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "buenas",
+          "start_ms": 0,
+          "end_ms": 306
+        },
+        {
+          "word": "tardes",
+          "start_ms": 306,
+          "end_ms": 614
+        }
+      ]
+    },
+    {
+      "id": "como_estas",
+      "text": "como estas",
+      "duration_ms": 1323,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "como",
+          "start_ms": 0,
+          "end_ms": 252
+        },
+        {
+          "word": "estas",
+          "start_ms": 252,
+          "end_ms": 505
+        }
+      ]
+    },
+    {
+      "id": "me_llamo_ana",
+      "text": "me llamo ana",
+      "duration_ms": 1675,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "me",
+          "start_ms": 0,
+          "end_ms": 213
+        },
+        {
+          "word": "llamo",
+          "start_ms": 213,
+          "end_ms": 426
+        },
+        {
+          "word": "ana",
+          "start_ms": 426,
+          "end_ms": 640
+        }
+      ]
+    },
+    {
+      "id": "mi_familia",
+      "text": "mi familia",
+      "duration_ms": 1543,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "mi",
+          "start_ms": 0,
+          "end_ms": 294
+        },
+        {
+          "word": "familia",
+          "start_ms": 294,
+          "end_ms": 589
+        }
+      ]
+    },
+    {
+      "id": "mi_hermano",
+      "text": "mi hermano",
+      "duration_ms": 1389,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "mi",
+          "start_ms": 0,
+          "end_ms": 264
+        },
+        {
+          "word": "hermano",
+          "start_ms": 264,
+          "end_ms": 530
+        }
+      ]
+    },
+    {
+      "id": "vivo_bogota",
+      "text": "vivo en bogota",
+      "duration_ms": 1631,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "vivo",
+          "start_ms": 0,
+          "end_ms": 207
+        },
+        {
+          "word": "en",
+          "start_ms": 207,
+          "end_ms": 415
+        },
+        {
+          "word": "bogota",
+          "start_ms": 415,
+          "end_ms": 623
+        }
+      ]
+    },
+    {
+      "id": "soy_estudiante",
+      "text": "soy estudiante",
+      "duration_ms": 1896,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "soy",
+          "start_ms": 0,
+          "end_ms": 362
+        },
+        {
+          "word": "estudiante",
+          "start_ms": 362,
+          "end_ms": 724
+        }
+      ]
+    },
+    {
+      "id": "soy_doctora",
+      "text": "soy doctora",
+      "duration_ms": 1653,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "soy",
+          "start_ms": 0,
+          "end_ms": 315
+        },
+        {
+          "word": "doctora",
+          "start_ms": 315,
+          "end_ms": 631
+        }
+      ]
+    },
+    {
+      "id": "tengo_hambre",
+      "text": "tengo hambre",
+      "duration_ms": 1256,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "tengo",
+          "start_ms": 0,
+          "end_ms": 239
+        },
+        {
+          "word": "hambre",
+          "start_ms": 239,
+          "end_ms": 479
+        }
+      ]
+    },
+    {
+      "id": "estoy_contenta",
+      "text": "estoy contenta",
+      "duration_ms": 2271,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "estoy",
+          "start_ms": 0,
+          "end_ms": 433
+        },
+        {
+          "word": "contenta",
+          "start_ms": 433,
+          "end_ms": 867
+        }
+      ]
+    },
+    {
+      "id": "estoy_triste",
+      "text": "estoy triste",
+      "duration_ms": 1808,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "estoy",
+          "start_ms": 0,
+          "end_ms": 345
+        },
+        {
+          "word": "triste",
+          "start_ms": 345,
+          "end_ms": 690
+        }
+      ]
+    },
+    {
+      "id": "trabajo_bogota",
+      "text": "trabajo en bogota",
+      "duration_ms": 1830,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "trabajo",
+          "start_ms": 0,
+          "end_ms": 232
+        },
+        {
+          "word": "en",
+          "start_ms": 232,
+          "end_ms": 465
+        },
+        {
+          "word": "bogota",
+          "start_ms": 465,
+          "end_ms": 698
+        }
+      ]
+    },
+    {
+      "id": "cuanto_ganas",
+      "text": "cuanto ganas",
+      "duration_ms": 1455,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "cuanto",
+          "start_ms": 0,
+          "end_ms": 277
+        },
+        {
+          "word": "ganas",
+          "start_ms": 277,
+          "end_ms": 555
+        }
+      ]
+    },
+    {
+      "id": "donde_vives",
+      "text": "donde vives",
+      "duration_ms": 1433,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "donde",
+          "start_ms": 0,
+          "end_ms": 273
+        },
+        {
+          "word": "vives",
+          "start_ms": 273,
+          "end_ms": 547
+        }
+      ]
+    },
+    {
+      "id": "quien_es_ella",
+      "text": "quien es ella",
+      "duration_ms": 1190,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "quien",
+          "start_ms": 0,
+          "end_ms": 150
+        },
+        {
+          "word": "es",
+          "start_ms": 150,
+          "end_ms": 302
+        },
+        {
+          "word": "ella",
+          "start_ms": 302,
+          "end_ms": 454
+        }
+      ]
+    },
+    {
+      "id": "por_favor_ayuda",
+      "text": "por favor ayuda",
+      "duration_ms": 1764,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "por",
+          "start_ms": 0,
+          "end_ms": 224
+        },
+        {
+          "word": "favor",
+          "start_ms": 224,
+          "end_ms": 449
+        },
+        {
+          "word": "ayuda",
+          "start_ms": 449,
+          "end_ms": 673
+        }
+      ]
+    },
+    {
+      "id": "bien_mas_o_menos",
+      "text": "bien mas o menos",
+      "duration_ms": 1940,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "bien",
+          "start_ms": 0,
+          "end_ms": 185
+        },
+        {
+          "word": "mas",
+          "start_ms": 185,
+          "end_ms": 370
+        },
+        {
+          "word": "o",
+          "start_ms": 370,
+          "end_ms": 555
+        },
+        {
+          "word": "menos",
+          "start_ms": 555,
+          "end_ms": 740
+        }
+      ]
+    },
+    {
+      "id": "nunca",
+      "text": "nunca",
+      "duration_ms": 926,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "nunca",
+          "start_ms": 0,
+          "end_ms": 353
+        }
+      ]
+    },
+    {
+      "id": "muchas_personas",
+      "text": "cuantas personas son",
+      "duration_ms": 2491,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "cuantas",
+          "start_ms": 0,
+          "end_ms": 317
+        },
+        {
+          "word": "personas",
+          "start_ms": 317,
+          "end_ms": 634
+        },
+        {
+          "word": "son",
+          "start_ms": 634,
+          "end_ms": 951
+        }
+      ]
+    },
+    {
+      "id": "conversacion_1",
+      "text": "hola, buenos dias, como estas",
+      "duration_ms": 3638,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "hola,",
+          "start_ms": 0,
+          "end_ms": 277
+        },
+        {
+          "word": "buenos",
+          "start_ms": 277,
+          "end_ms": 555
+        },
+        {
+          "word": "dias,",
+          "start_ms": 555,
+          "end_ms": 833
+        },
+        {
+          "word": "como",
+          "start_ms": 833,
+          "end_ms": 1111
+        },
+        {
+          "word": "estas",
+          "start_ms": 1111,
+          "end_ms": 1389
+        }
+      ]
+    },
+    {
+      "id": "conversacion_2",
+      "text": "me llamo ana, vivo en bogota, soy estudiante",
+      "duration_ms": 5688,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "me",
+          "start_ms": 0,
+          "end_ms": 271
+        },
+        {
+          "word": "llamo",
+          "start_ms": 271,
+          "end_ms": 542
+        },
+        {
+          "word": "ana,",
+          "start_ms": 542,
+          "end_ms": 814
+        },
+        {
+          "word": "vivo",
+          "start_ms": 814,
+          "end_ms": 1086
+        },
+        {
+          "word": "en",
+          "start_ms": 1086,
+          "end_ms": 1358
+        },
+        {
+          "word": "bogota,",
+          "start_ms": 1358,
+          "end_ms": 1629
+        },
+        {
+          "word": "soy",
+          "start_ms": 1629,
+          "end_ms": 1901
+        },
+        {
+          "word": "estudiante",
+          "start_ms": 1901,
+          "end_ms": 2173
+        }
+      ]
+    },
+    {
+      "id": "conversacion_3",
+      "text": "tengo hambre, por favor, donde esta el restaurante",
+      "duration_ms": 5755,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "tengo",
+          "start_ms": 0,
+          "end_ms": 274
+        },
+        {
+          "word": "hambre,",
+          "start_ms": 274,
+          "end_ms": 549
+        },
+        {
+          "word": "por",
+          "start_ms": 549,
+          "end_ms": 824
+        },
+        {
+          "word": "favor,",
+          "start_ms": 824,
+          "end_ms": 1099
+        },
+        {
+          "word": "donde",
+          "start_ms": 1099,
+          "end_ms": 1373
+        },
+        {
+          "word": "esta",
+          "start_ms": 1373,
+          "end_ms": 1648
+        },
+        {
+          "word": "el",
+          "start_ms": 1648,
+          "end_ms": 1923
+        },
+        {
+          "word": "restaurante",
+          "start_ms": 1923,
+          "end_ms": 2198
+        }
+      ]
+    },
+    {
+      "id": "conversacion_4",
+      "text": "bien, muchas gracias, hasta manana",
+      "duration_ms": 4762,
+      "sample_rate": 16000,
+      "pause_ms": 0,
+      "words": [
+        {
+          "word": "bien,",
+          "start_ms": 0,
+          "end_ms": 363
+        },
+        {
+          "word": "muchas",
+          "start_ms": 363,
+          "end_ms": 727
+        },
+        {
+          "word": "gracias,",
+          "start_ms": 727,
+          "end_ms": 1091
+        },
+        {
+          "word": "hasta",
+          "start_ms": 1091,
+          "end_ms": 1455
+        },
+        {
+          "word": "manana",
+          "start_ms": 1455,
+          "end_ms": 1819
+        }
+      ]
+    }
+  ]
+}
