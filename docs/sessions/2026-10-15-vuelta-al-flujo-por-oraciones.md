@@ -93,14 +93,21 @@ del histograma es `model="?"` porque no corrió ninguna inferencia. Es
 información correcta, pero confunde al leer `stt_final_ms`. Se deja así porque
 arreglarlo es cambiar el contrato de métricas y eso merece su propio cambio.
 
+## Autorización de commit para esta rama
+
+El 15 de octubre el owner autorizó commitear **sin pedir permiso** en la rama
+`flujo-oraciones` de los tres repos, mientras el trabajo siga siendo local y en
+esa rama. Es una excepción acotada a este trabajo: la regla de `AGENTS.md` ("nada
+de commits en los hermanos sin que el owner lo pida", PR contra `develop`) sigue
+vigente para cualquier otra cosa, y `main` no se toca hasta que el owner decida
+el destino del trabajo.
+
 ## Pendiente del owner
 
-1. **Commit.** Nada commiteado: los repos hermanos se commitean por pedido
-   explícito. Los cambios están en el working tree de `flujo-oraciones`.
-2. **Remedir.** Las cifras del perfil de tiempo real (p50 839 ms de fin del
+1. **Remedir.** Las cifras del perfil de tiempo real (p50 839 ms de fin del
    habla a final) no son comparables con las de ahora: el silencio era de 600 ms
    en vez de 1500, y 600 ms es el término que se quitó. Ver §8 de
    `docs/performance.md`.
-3. **La app.** `{"type":"end"}` al apagar el micrófono y atender el `final`
+2. **La app.** `{"type":"end"}` al apagar el micrófono y atender el `final`
    vacío es el otro lado del arreglo; hasta que la app no lo haga, el `end`
    sigue sin respuesta útil para ella.
