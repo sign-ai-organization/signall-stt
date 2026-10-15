@@ -36,25 +36,51 @@ El servicio queda en `http://localhost:8000`.
 
 | Variable | Default | Descripción |
 |---|---|---|
-| `MODEL_SIZE` | `medium` | `tiny`, `base`, `small`, `medium`, `large-v3` |
+| `MODEL_SIZE` | `medium` | `tiny`, `base`, `small`, `medium`, `large-v3`. Se usa para **todo**: finales y parciales |
 | `DEVICE` | `cuda` | `cuda` o `cpu` |
 | `COMPUTE_TYPE` | `float16` | `float16` (GPU) o `int8` (CPU) |
 | `LANGUAGE` | `es` | Idioma para Whisper |
 | `VAD_AGGRESSIVENESS` | `2` | 0 (permisivo) a 3 (estricto) |
-| `SILENCE_TIMEOUT_MS` | `1500` | Silencio para cerrar un segmento |
+| `SILENCE_TIMEOUT_MS` | `1500` | Silencio para cerrar un segmento. Es el mayor término de la latencia: bajarlo parte las frases en las pausas |
 | `PARTIAL_INTERVAL_MS` | `400` | Intervalo entre parciales; `0` los desactiva |
+| `MIN_AUDIO_MS_FOR_PARTIAL` | `200` | Audio mínimo antes de poder parcial |
+| `SPEECH_ONSET_WINDOW_MS` | `300` | Ventana de confirmación de inicio de habla |
+| `SPEECH_ONSET_RATIO` | `0.9` | Proporción mínima de frames con habla en esa ventana |
+| `MAX_BUFFER_MS` | `8000` | Un segmento más largo que esto se corta en la pausa más cercana |
+| `FINAL_TRAILING_SILENCE_KEEP_MS` | `300` | Silencio final que se conserva al transcribir |
 | `MIN_RMS` | `0.008` | Filtro anti-alucinación por energía |
+| `AVG_LOGPROB_THRESHOLD` | `-1.0` | Default de Whisper. **No subir a `-0.8`**: descarta audio que el modelo transcribió bien (medido: "cómo estás", "estoy triste") |
+| `WORD_TIMESTAMPS` | `false` | Mandar `words` con inicio/fin de cada palabra. Nadie lo lee hoy; ver la nota en `app/config.py` |
+| `MAX_CONCURRENT_INFERENCE` | `1` | Inferencias simultáneas en la GPU. Whisper serializa igual por abajo; con más de uno solo hay thrash |
+
+Los seis valores de silencio e inicio de habla son los del diagrama 6.3 del
+SDD. Están también explícitos en `docker-compose.yml` a propósito.
 
 Ver `app/config.py` para la lista completa. Copiá `.env.example` a `.env` para
 ajustarlas (`docker compose` lo lee solo).
 
 ## API
 
+Este servicio **solo transcribe**. No divide en oraciones, no traduce y no
+decide qué se firma: eso es del backend, que recibe la frase completa y la
+manda a firmar cuando el cliente se la envía como `text`. El contrato completo
+está en `docs/android-integration.md` del repo hermano.
+
 ### `GET /health`
 
 ```json
-{"status": "ok", "model": "medium", "device": "cuda", "language": "es"}
+{"status": "ok", "model": "medium", "device": "cuda", "language": "es", "silence_timeout_ms": 1500}
 ```
+
+### `GET /metrics` y `GET /metrics.json`
+
+Métricas en formato de exposición de Prometheus y en JSON. Las que tienen
+histograma son `stt_inference_ms`, `stt_final_ms`, `stt_partial_ms`,
+`stt_partial_queue_ms` (espera por la GPU), `stt_final_lag_ms`,
+`stt_partial_lag_ms` (audio recibido menos el que ya estaba en el buffer cuando
+arrancó la inferencia) y `stt_end_to_final_ms` (dejar de hablar → final
+disponible). Los contadores incluyen `stt_dropped_total{reason}`, donde el
+`reason` dice *por qué* se descartó: `rms`, `no_speech`, `logprob` o `empty`.
 
 ### `POST /transcribe`
 
@@ -63,12 +89,17 @@ WAV mono PCM16 a 16 kHz.
 
 ```bash
 curl -F "file=@audio.wav" http://localhost:8000/transcribe
-# {"text": "hola como estas"}
+# {"text": "hola como estas", "audio_ms": 990, "elapsed_ms": 205,
+#  "drop_reason": null, "words": []}
 ```
+
+`drop_reason` es lo que distingue "no había nada que transcribir" de "el
+micrófono no está funcionando": sin él, un `text` vacío es indistinguible de un
+micrófono roto.
 
 ### `WS /ws/transcribe`
 
-Streaming en tiempo real. Protocolo:
+Streaming. Protocolo:
 
 1. El cliente abre el WebSocket y envía frames **binarios**: audio crudo
    PCM16LE mono a 16 kHz (sin cabecera WAV), en los chunks que le resulten
@@ -76,15 +107,32 @@ Streaming en tiempo real. Protocolo:
    el VAD.
 2. El servidor responde con mensajes **JSON de texto** a medida que detecta
    habla:
-   - `{"type": "partial", "text": "..."}` — transcripción parcial mientras
-     la persona sigue hablando. Se calculan en segundo plano, sin frenar
-     el procesamiento del audio, y nunca llegan después del final de su
-     frase. `PARTIAL_INTERVAL_MS=0` los desactiva.
-   - `{"type": "final", "text": "..."}` — transcripción final de un
-     segmento de habla (silencio detectado o buffer máximo alcanzado).
+   - `{"type": "partial", "text": "...", "audio_ms": 1200}` — transcripción
+     parcial mientras la persona sigue hablando. Se calculan en segundo plano,
+     sin frenar el procesamiento del audio, y nunca llegan después del final de
+     su frase. `PARTIAL_INTERVAL_MS=0` los desactiva.
+   - `{"type": "final", "text": "...", "audio_ms": 1710}` — transcripción final
+     de un segmento de habla (silencio detectado, buffer máximo alcanzado o
+     `end` del cliente).
 3. El cliente puede enviar el texto `"end"` (frame de texto plano, no JSON)
    para forzar el cierre y la transcripción final del segmento en curso —
    útil al finalizar la grabación.
+
+**El `end` siempre recibe respuesta.** Un `final` con `text` vacío, o incluso
+sin audio pendiente (`audio_ms: 0`), es una respuesta válida: la frase se cerró
+y no tenía palabras, típicamente porque el filtro de descarte no encontró voz.
+Esto solo aplica al `end`: los finales que dispara el silencio por su cuenta se
+descartan si vienen vacíos, porque en ese camino nadie está preguntando. Un
+cliente que manda `end` y no atiende ese `final` se queda esperando un timeout
+propio y acaba reportando como fallida una transcripción que nunca existió.
+
+### Campos adicionales
+
+`audio_ms` viaja siempre: son los milisegundos de audio del buffer que se
+transcribió, y le sirven al cliente para distinguir una frase corta de una larga.
+`words` (el instante de cada palabra) solo aparece con `WORD_TIMESTAMPS=true` y
+hoy nadie lo lee: existía para el camino que firmaba por fragmentos, que ya no
+está. Ver la nota en `app/config.py` antes de prenderlo.
 
 Ver `scripts/mic_test_client.py` para una implementación de referencia del
 lado cliente (usa el micrófono del host, no el del contenedor).
@@ -100,14 +148,29 @@ Esto abre el micrófono del host y transmite al servicio corriendo en Docker
 (`ws://localhost:8000/ws/transcribe` por defecto), replicando el
 comportamiento del script original de escritorio.
 
+### Fixtures de audio
+
+`fixtures/audio/*.json` describe 28 clips (texto, duración y palabras). Los
+`.wav` **no están en git** — son unos 315 MB de audio binario — y se regeneran
+con Piper:
+
+```bash
+python scripts/make_audio_fixtures.py --all
+```
+
+El script es determinista: el mismo texto produce siempre el mismo WAV, así que
+las cifras de latencia de `docs/performance.md` son comparables entre corridas.
+
 ## Estructura
 
 ```
 app/
   config.py       # settings desde variables de entorno
-  transcriber.py  # carga de modelo + transcripción de un buffer
+  metrics.py      # registro de métricas (/metrics y /metrics.json)
+  transcriber.py  # carga de modelo, InferenceScheduler y transcripción de un buffer
   session.py      # buffering + VAD + partial/final por conexión WS
-  main.py         # FastAPI: /health, /transcribe, /ws/transcribe
+  main.py         # FastAPI: /health, /metrics, /transcribe, /ws/transcribe
 scripts/
-  mic_test_client.py  # cliente de prueba (no va en la imagen Docker)
+  mic_test_client.py        # cliente de prueba (no va en la imagen Docker)
+  make_audio_fixtures.py    # genera los .wav de fixtures/audio con Piper
 ```

@@ -213,3 +213,85 @@ la frase siguiente "reemplazara" a la anterior.
 **Observación:** en una frase se perdió un "No" inicial corto, probablemente
 porque quedó fuera de la ventana de confirmación del inicio. Ocurrió una
 vez; si se repite, se ajusta con `SPEECH_ONSET_WINDOW_MS`.
+
+---
+
+## 8. Vuelta al flujo por oraciones: qué de la latencia se queda y qué no
+
+**Fecha:** 2026-10-15
+**Plan:** `sign-ai-docs/auditoria-flujo-2026-10-15.md` §6.2
+
+Entre el 13 y el 14 de octubre este servicio corrió con un perfil de tiempo
+real: cinco defaults cambiados (silencio 600 ms, parciales cada 250 ms, ventana
+de inicio 150 ms al 0.7, 120 ms de silencio final conservado), un segundo modelo
+`small` para los parciales y los timestamps por palabra. La unidad de traducción
+del backend pasó a ser el fragmento y el avatar firmaba mientras la persona
+hablaba.
+
+Ese camino no aparece en ningún diagrama del SDD ni en los requisitos, así que
+se desarmó y la rama quedó en `flujo-oraciones`. La entrada 7 de esta bitácora
+y las seis anteriores **no se tocan**: describen valores que siguen en pie.
+
+### Lo que se conserva, y por qué no es del perfil de tiempo real
+
+**El umbral de logprob, en `-1.0`.** A `-0.8` el filtro descartaba frases que el
+modelo había transcrito bien: sobre los fixtures de
+`scripts/make_audio_fixtures.py` se comía "cómo estás" y "estoy triste", que
+llegaban como transcripción vacía sin dejar rastro. Descartar audio real es
+peor que aceptar una frase dudosa. Es el default de faster-whisper y de
+whisper mismo, y el valor de referencia para el filtro pasó a ser `no_speech`.
+
+**El buffer con `list.append`.** Antes cada frame de 30 ms se concatenaba contra
+el buffer completo: para 8 s de habla son ~270 concatenaciones de un arreglo que
+llega a 128k muestras, ~68 MB de memcpy, en el hilo del bucle de eventos. Eso
+bloqueaba la VAD de *todas* las conexiones, no solo la propia. Es un bug de
+concurrencia (RNF-REL-01), no una decisión de latencia.
+
+**El `InferenceScheduler`.** Sin orden explícito, el orden de llegada es el
+orden de ejecución: un parcial que arrancó antes que un final se ejecutaba
+primero. Con `MAX_CONCURRENT_INFERENCE=1` es un envoltorio sin efecto sobre el
+tiempo, y su valor aparece cuando hay más de una sesión. Se conserva entero.
+
+**El motivo del descarte y la métrica de atraso.** `TranscriptionResult` dice si
+el final se descartó por `rms`, `no_speech`, `logprob` o `empty`, y `_lag_ms`
+mide *audio recibido menos el que ya estaba en el buffer cuando arrancó la
+inferencia*. Antes medía contra el reloj de la sesión, lo que mezclaba dos cosas
+sin relación: con el micrófono apagado 20 s el número llegaba a 20000 ms y
+parecía una GPU saturada, y al reproducir más rápido que tiempo real salía
+negativo. Sin ese dato, un final vacío es indistinguible de un micrófono roto.
+
+**El `end` que siempre responde.** Vacío incluido. Es lo que hace el botón del
+micrófono de la app: sin respuesta, el cliente se come su propio timeout y
+reporta como fallida una frase que nunca existió.
+
+### Lo que se va
+
+| | En el perfil | Ahora |
+|---|---|---|
+| `SILENCE_TIMEOUT_MS` | 600 ms | **1500 ms**, el del diagrama 6.3 |
+| `PARTIAL_INTERVAL_MS` | 250 ms | 400 ms |
+| `SPEECH_ONSET_WINDOW_MS` / `_RATIO` | 150 ms / 0.7 | 300 ms / 0.9 |
+| `FINAL_TRAILING_SILENCE_KEEP_MS` | 120 ms | 300 ms |
+| `MIN_AUDIO_MS_FOR_PARTIAL` | 160 ms | 200 ms |
+| Modelos | dos (`medium` + `small`) | uno |
+| `WORD_TIMESTAMPS` | `true` | `false` |
+
+Los parciales **se quedan**: son RF-STT-02 y son del 30 de septiembre,
+anteriores al perfil. El texto se muestra progresivo porque es un requisito, no
+porque sirva para firmar antes.
+
+### Lo que hay que remedir antes de comparar
+
+Las cifras del perfil de tiempo real (fin del habla → final **p50 839 ms /
+p95 958 ms**, inferencia de un parcial **p50 92 ms**, espera por la GPU
+**p95 0.8 ms**) **no son comparables** con las de ahora: el silencio era de 600
+ms en vez de 1500, y 600 ms es exactamente el término que se quitó. Repetir la
+medición con `SILENCE_TIMEOUT_MS=1500` y un solo modelo antes de sacar ninguna
+conclusión. La entrada 7 sigue siendo la referencia de referencia: 1813–2099 ms
+de fin del habla a final disponible.
+
+con los valores de ahora, sobre los fixtures y por la pila completa, el final
+sale entre 205 y 227 ms de inferencia y la espera por la GPU es de ~1 ms. Eso no
+es una cifra de latencia de titular: le faltan los 1500 ms de silencio más lo
+que el backend tarde en traducir. Para ese número hay que medir
+`stt_end_to_final_ms` y `rt_first_sign_ms` juntos, que están en los dos servicios.
