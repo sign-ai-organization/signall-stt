@@ -110,7 +110,7 @@ async def transcribe_file(file: UploadFile = File(...)):
 async def ws_transcribe(websocket: WebSocket):
     await websocket.accept()
     session = StreamingSession(state["model"], state["scheduler"], state["vad"], settings)
-    metrics.gauge("stt_sessions_active", metrics.counter_value("stt_sessions_active") + 1)
+    metrics.gauge("stt_sessions_active", metrics.gauge_value("stt_sessions_active") + 1)
 
     try:
         while True:
@@ -134,5 +134,5 @@ async def ws_transcribe(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
-        metrics.gauge("stt_sessions_active", max(0.0, metrics.counter_value("stt_sessions_active") - 1))
+        metrics.gauge("stt_sessions_active", max(0.0, metrics.gauge_value("stt_sessions_active") - 1))
         metrics.counter("stt_sessions_total")

@@ -19,7 +19,7 @@ Dos decisiones de este archivo no dependen de con qué ritmo hable la persona:
    y su texto confundiría al backend, así que se descarta. Además se cancela si
    todavía no llegó a la GPU, para que no quede encolado delante del final.
 
-Lo que este archivo **no** decide es qué se firma: eso es del backend, que
+Lo que este archivo **no** decide es qué se representa: eso es del backend, que
 divide la frase en oraciones cuando el cliente se la manda como `text`.
 """
 
@@ -66,12 +66,13 @@ class StreamingSession:
         self._silence_ms = 0
         self._last_partial_time = time.monotonic()
 
-        self._first_chunk_at: float | None = None
         self._received_audio_ms = 0
         # Foto del audio recibido en el instante en que arrancó la última
         # inferencia. Es la referencia de `_lag_ms`.
         self._backlog_snapshot_ms: float | None = None
-        self._speech_end_audio_ms = 0
+        # Reloj de pared del último frame que el VAD marcó como voz. Es la
+        # referencia de `stt_end_to_final_ms` (ver `_log_final`).
+        self._speech_end_at: float | None = None
 
         onset_frames = max(1, settings.SPEECH_ONSET_WINDOW_MS // settings.FRAME_DURATION_MS)
         self._onset_window: deque[tuple[np.ndarray, bool]] = deque(maxlen=onset_frames)
@@ -85,8 +86,6 @@ class StreamingSession:
     # ---------------------------------------------------------------- audio
 
     async def feed(self, chunk: bytes) -> list[dict]:
-        if self._first_chunk_at is None:
-            self._first_chunk_at = time.monotonic()
         self._pcm_buffer.extend(chunk)
         results = []
         metrics.counter("stt_audio_bytes_total", len(chunk))
@@ -159,23 +158,22 @@ class StreamingSession:
         speech_detected = vad_speech and frame_rms >= self._settings.MIN_RMS
 
         self._received_audio_ms += self._settings.FRAME_DURATION_MS
+        now = time.monotonic()
 
         if not self._is_speaking:
-            self._detect_speech_onset(frame_float, speech_detected)
+            self._detect_speech_onset(frame_float, speech_detected, now)
         elif speech_detected:
             self._append_speech(frame_float)
             self._frame_flags.append(True)
             self._silence_ms = 0
             self._speech_since_partial = True
+            self._speech_end_at = now
         else:
-            if self._silence_ms == 0:
-                self._speech_end_audio_ms = self._received_audio_ms - self._settings.FRAME_DURATION_MS
             self._append_speech(frame_float)
             self._frame_flags.append(False)
             self._silence_ms += self._settings.FRAME_DURATION_MS
 
         buffer_ms = self._speech_samples / self._settings.SAMPLE_RATE * 1000
-        now = time.monotonic()
 
         do_final = self._is_speaking and (
             self._silence_ms >= self._settings.SILENCE_TIMEOUT_MS
@@ -239,7 +237,12 @@ class StreamingSession:
         self._speech_chunks = [audio]
         return audio
 
-    def _detect_speech_onset(self, frame_float: np.ndarray, speech_detected: bool) -> None:
+    def _detect_speech_onset(
+        self,
+        frame_float: np.ndarray,
+        speech_detected: bool,
+        now: float,
+    ) -> None:
         self._onset_window.append((frame_float, speech_detected))
         speech_frames = sum(1 for _, is_speech in self._onset_window if is_speech)
         window_full = len(self._onset_window) == self._onset_window.maxlen
@@ -249,6 +252,12 @@ class StreamingSession:
         for frame, _ in self._onset_window:
             self._append_speech(frame)
         self._frame_flags = [is_speech for _, is_speech in self._onset_window]
+        # Los frames de la ventana son los únicos que traversed esta rama, así
+        # que el reloj de "dejaste de hablar" se actualiza acá. Solo si el frame
+        # actual es voz: si la ventana cerró en silencio, el último frame de voz
+        # llegó hasta `SPEECH_ONSET_WINDOW_MS` antes y no hay con qué ser exacto.
+        if speech_detected:
+            self._speech_end_at = now
         self._onset_window.clear()
         self._is_speaking = True
         self._silence_ms = 0
@@ -401,11 +410,15 @@ class StreamingSession:
             f"[timing] final ({reason}): audio={result.audio_ms / 1000:.1f}s "
             f"transcripcion={result.elapsed_ms:.0f}ms atraso={lag_ms:.0f}ms"
         )
-        if reason == "silencio" and self._first_chunk_at is not None:
-            speech_end_at = self._first_chunk_at + self._speech_end_audio_ms / 1000
-            end_to_final_ms = (time.monotonic() - speech_end_at) * 1000
+        if self._speech_end_at is not None:
+            end_to_final_ms = (time.monotonic() - self._speech_end_at) * 1000
             line += f" fin_habla->final={end_to_final_ms:.0f}ms"
-            metrics.histogram("stt_end_to_final_ms", end_to_final_ms, "Dejar de hablar a final disponible")
+            metrics.histogram(
+                "stt_end_to_final_ms",
+                end_to_final_ms,
+                "Dejar de hablar a final disponible",
+                {"reason": reason},
+            )
         if result.drop_reason:
             line += f" descartado={result.drop_reason}"
 
