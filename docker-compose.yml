@@ -26,7 +26,7 @@ services:
       FINAL_TRAILING_SILENCE_KEEP_MS: ${FINAL_TRAILING_SILENCE_KEEP_MS:-300}
       MAX_BUFFER_MS: ${MAX_BUFFER_MS:-8000}
       # Nadie lee los timestamps por palabra: existían para el camino que
-      # firmaba por fragmentos. Ver la nota de `WORD_TIMESTAMPS` en
+      # representaba por fragmentos. Ver la nota de `WORD_TIMESTAMPS` en
       # `app/config.py` antes de prenderlo.
       WORD_TIMESTAMPS: ${WORD_TIMESTAMPS:-false}
       MAX_CONCURRENT_INFERENCE: ${MAX_CONCURRENT_INFERENCE:-1}

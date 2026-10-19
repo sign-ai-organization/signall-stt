@@ -278,7 +278,7 @@ reporta como fallida una frase que nunca existió.
 
 Los parciales **se quedan**: son RF-STT-02 y son del 30 de septiembre,
 anteriores al perfil. El texto se muestra progresivo porque es un requisito, no
-porque sirva para firmar antes.
+porque sirva para representar antes.
 
 ### Lo que hay que remedir antes de comparar
 

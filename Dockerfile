@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 ENV LD_LIBRARY_PATH="/usr/local/lib/python3.11/site-packages/nvidia/cublas/lib:/usr/local/lib/python3.11/site-packages/nvidia/cudnn/lib"
 
 COPY app ./app
+# `scripts/` no va en la imagen a propósito: hay utilidades de escritorio que
+# necesitan Piper y `sounddevice`, que el servicio no tiene. Las pruebas se
+# corren montando la carpeta desde el host (ver README, "Pruebas").
 
 EXPOSE 8000
 

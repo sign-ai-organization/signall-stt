@@ -89,7 +89,7 @@ def load_model(settings: Settings) -> WhisperModel:
 
     Hubo dos (`MODEL_SIZE` y `PARTIAL_MODEL_SIZE`, chico para los parciales)
     porque un parcial se descarta en cuanto llega el final y no necesitaba la
-    precisión del grande. Ese criterio era del camino que firmaba por
+    precisión del grande. Ese criterio era del camino que representaba por
     fragmentos; con la oración como unidad, un parcial malo se nota igual que
     un final malo y dos modelos solo agregan VRAM y una segunda caché.
     """

@@ -45,7 +45,7 @@ class Settings:
     SILENCE_TIMEOUT_MS: int = _env_int("SILENCE_TIMEOUT_MS", 1500)
     # Los parciales se quedan (RF-STT-02, del 30 de septiembre: anteriores al
     # perfil de tiempo real). El texto se muestra progresivo porque es un
-    # requisito, no porque sirva para firmar antes.
+    # requisito, no porque sirva para representar antes.
     PARTIAL_INTERVAL_MS: int = _env_int("PARTIAL_INTERVAL_MS", 400)  # 0 = parciales desactivados
     MIN_AUDIO_MS_FOR_PARTIAL: int = _env_int("MIN_AUDIO_MS_FOR_PARTIAL", 200)
     MAX_BUFFER_MS: int = _env_int("MAX_BUFFER_MS", 8000)
@@ -77,7 +77,7 @@ class Settings:
     #
     # Nadie los lee: existían para que el backend decidiera qué parte de la frase
     # ya se había terminado de decir, que era la regla del camino por fragmentos.
-    # Con la unidad de traducción siendo la oración, la frase se firma cuando
+    # Con la unidad de traducción siendo la oración, la frase se representa cuando
     # termina, no a mitad de camino, y el backend ya no mira el campo.
     #
     # Se deja el ajuste y no se borra el código porque es la forma de volver a

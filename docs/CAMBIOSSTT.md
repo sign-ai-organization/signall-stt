@@ -25,7 +25,7 @@ flujo **por oraciones**, y qué tiene que hacer el resto del sistema con esto.
 
 El perfil de tiempo real existía para producing **parciales rápidos** (`small`)
 mientras un `medium` cerraba la frase: el backend traducía cada parcial y el
-avatar firmaba a mitad de camino. Con oraciones eso no hace falta —solo importa el
+avatar representaba a mitad de camino. Con oraciones eso no hace falta —solo importa el
 `final`—, así que hay **un solo modelo** y el silencio queda puesto en el
 valor del SDD.
 
@@ -42,7 +42,7 @@ valor del SDD.
 
 **Los parciales se quedan** (`PARTIAL_INTERVAL_MS=400`): son RF-STT-02, del 30 de
 septiembre, anteriores al perfil. El texto se muestra progresivo porque es un
-requisito, no porque sirva para firmar antes — en el flujo por oraciones el
+requisito, no porque sirva para representar antes — en el flujo por oraciones el
 partial no dispara nada.
 
 `WORD_TIMESTAMPS=false` porque con la oración completa no hay por qué alinear
@@ -116,6 +116,14 @@ curl -s 127.0.0.1:8000/health
 # {"status":"ok","model":"medium","device":"cuda","language":"es","silence_timeout_ms":1500}
 ```
 
+La lógica de `session.py` —la que decide cuándo se cierra una frase— se prueba
+sin GPU, sin micrófono y sin los fixtures de audio:
+
+```bash
+docker compose -f ../sign-ai-backend/docker-compose.yml run --rm --no-deps \
+    -v "$PWD/scripts:/app/scripts" stt python -m scripts.verify_session
+```
+
 Los parciales, los descartes y el atraso, en los logs del contenedor:
 
 ```bash
@@ -127,7 +135,7 @@ Desde el repo de Android, las tres mediciones que usan los 28 fixtures:
 ```bash
 tools/verificar-tiempo-real.sh contrato   # divisor de oraciones + protocolo
 tools/medir-primera-sena.py               # de dónde sale la primera seña
-tools/medir-retraso.py                    # ¿el avatar alcanza a firmar mientras hablás?
+tools/medir-retraso.py                    # cuánto se sigue representando tras hablar
 ```
 
 ---
@@ -141,6 +149,28 @@ tools/medir-retraso.py                    # ¿el avatar alcanza a firmar mientra
 - **Los nombres de métrica tienen que coincidir.** `rt_first_sign_ms` y
   `stt_end_to_final_ms` miden tramos distintos del mismo camino y solo se suman
   si los dos lados los instrumentaron.
+---
+
+## 2026-10-16 — Métricas que mentían, y las primeras pruebas
+
+- **`stt_end_to_final_ms` medía otra cosa.** La referencia la sacaba de
+  `primer chunk + audio recibido / 1000`, que asume que el audio llega a
+  velocidad real y sin pausas. Medido: con el micrófono apagado 3 s entre
+  dos frases de la misma conexión, la segunda daba **4805 ms** en vez de
+  1733 ms — el hueco se sumaba entero. Ahora se marca el reloj de pared en
+  el último frame que el VAD llamó voz, y las dos frases dan lo mismo.
+  También lleva etiqueta `reason`, así que se ven los finales cerrados por
+  `end` (dictado) y por silencio (en vivo) por separado.
+- **`stt_sessions_active` y `stt_inference_active` decían siempre 1.** Los
+  dos leían su valor con `counter_value()`, que mira el mapa de
+  contadores y siempre devuelve 0. Comprobado: con 3 sesiones abiertas el
+  gauge decía 3 ahora, y antes decía 1.
+- **`scripts/verify_session.py`**: las primeras pruebas de este repo.
+  Cubren la ventana de inicio, el cierre por `SILENCE_TIMEOUT_MS`, que una
+  pausa de 300 ms **no** parte la frase, el recorte del silencio final,
+  que `flush()` responde siempre, que el corte del tope del buffer cae en la
+  pausa, la prioridad del parcial y `audio_ms`. Corren en el contenedor del
+  servicio, sin GPU y sin los fixtures de audio (ver README, "Pruebas").
 
 ---
 

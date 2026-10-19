@@ -62,8 +62,8 @@ ajustarlas (`docker compose` lo lee solo).
 ## API
 
 Este servicio **solo transcribe**. No divide en oraciones, no traduce y no
-decide qué se firma: eso es del backend, que recibe la frase completa y la
-manda a firmar cuando el cliente se la envía como `text`. El contrato completo
+decide qué se representa: eso es del backend, que recibe la frase completa y la
+manda a representar cuando el cliente se la envía como `text`. El contrato completo
 está en `docs/android-integration.md` del repo hermano.
 
 ### `GET /health`
@@ -131,7 +131,7 @@ propio y acaba reportando como fallida una transcripción que nunca existió.
 `audio_ms` viaja siempre: son los milisegundos de audio del buffer que se
 transcribió, y le sirven al cliente para distinguir una frase corta de una larga.
 `words` (el instante de cada palabra) solo aparece con `WORD_TIMESTAMPS=true` y
-hoy nadie lo lee: existía para el camino que firmaba por fragmentos, que ya no
+hoy nadie lo lee: existía para el camino que representaba por fragmentos, que ya no
 está. Ver la nota en `app/config.py` antes de prenderlo.
 
 Ver `scripts/mic_test_client.py` para una implementación de referencia del
@@ -147,6 +147,31 @@ python scripts/mic_test_client.py
 Esto abre el micrófono del host y transmite al servicio corriendo en Docker
 (`ws://localhost:8000/ws/transcribe` por defecto), replicando el
 comportamiento del script original de escritorio.
+
+### Pruebas
+
+La lógica de `app/session.py` —buffering, ventana de inicio, cierre por
+silencio, recorte del silencio final, corte por pausa— está cubierta por
+`scripts/verify_session.py`. Corre sin GPU y sin los fixtures de audio (que no
+están en git): el VAD y el modelo se reemplazan por dobles, y lo que se prueba es
+la lógica de este repo.
+
+Se ejecuta en el contenedor del servicio, que es donde están las dependencias,
+con la carpeta montada desde el host:
+
+```bash
+docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" stt \
+    python -m scripts.verify_session
+```
+
+`docker compose` se corre desde `../sign-ai-backend`, que es donde está el
+compose que levanta este servicio. Sale con código 1 si algo falla, así que sirve
+como guardia de regresión: antes de tocar `SILENCE_TIMEOUT_MS` o `MAX_BUFFER_MS`,
+correrlo.
+
+Por qué importa: `SILENCE_TIMEOUT_MS` son 1500 ms de los ~4000 ms de latencia de
+punta a punta, y bajarlo parte las frases donde la persona respira. Con la
+prueba, ese número se cambia a la vista del efecto y no de memoria.
 
 ### Fixtures de audio
 
