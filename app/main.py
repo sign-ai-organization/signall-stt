@@ -10,15 +10,15 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from app.config import settings
 from app.metrics import metrics
 from app.session import StreamingSession
-from app.transcriber import PRIORITY_FINAL, InferenceScheduler, load_models, transcribe_buffer
+from app.transcriber import PRIORITY_FINAL, InferenceScheduler, load_model, transcribe_buffer, warm_up
 
 state: dict = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    models = load_models(settings)
-    state["models"] = models
+    state["model"] = load_model(settings)
+    warm_up(state["model"], settings)
     state["scheduler"] = InferenceScheduler(settings.MAX_CONCURRENT_INFERENCE)
     await state["scheduler"].start()
     state["vad"] = webrtcvad.Vad(settings.VAD_AGGRESSIVENESS)
@@ -35,22 +35,21 @@ app = FastAPI(title="SignAI STT Service", lifespan=lifespan)
 @app.get("/health")
 def health():
     return {
-        "status": "ok" if state.get("models") else "loading",
+        "status": "ok" if "model" in state else "loading",
         "model": settings.MODEL_SIZE,
-        "partial_model": settings.partial_model_size,
         "device": settings.DEVICE,
         "language": settings.LANGUAGE,
-        "realtime": settings.SILENCE_TIMEOUT_MS < 1500,
+        "silence_timeout_ms": settings.SILENCE_TIMEOUT_MS,
     }
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
 def prometheus_metrics():
-    """Metricas en formato de exposicion de Prometheus.
+    """Métricas en formato de exposición de Prometheus.
 
-    `curl localhost:8000/metrics` es el chequeo rapido. Para lo estructurado
-    esta `/metrics.json`: las pruebas automaticas leen ahi porque parsear texto
-    con expresiones regulares es fragil.
+    `curl localhost:8000/metrics` es el chequeo rápido. Para lo estructurado
+    está `/metrics.json`: las pruebas automáticas leen ahí porque parsear texto
+    con expresiones regulares es frágil.
     """
     return metrics.render()
 
@@ -61,7 +60,6 @@ def metrics_json():
         **metrics.snapshot(),
         "config": {
             "model": settings.MODEL_SIZE,
-            "partial_model": settings.partial_model_size,
             "device": settings.DEVICE,
             "silence_timeout_ms": settings.SILENCE_TIMEOUT_MS,
             "partial_interval_ms": settings.PARTIAL_INTERVAL_MS,
@@ -94,7 +92,7 @@ async def transcribe_file(file: UploadFile = File(...)):
     result = await state["scheduler"].run(
         PRIORITY_FINAL,
         transcribe_buffer,
-        state["models"]["final"],
+        state["model"],
         audio,
         settings,
         settings.MODEL_SIZE,
@@ -111,8 +109,8 @@ async def transcribe_file(file: UploadFile = File(...)):
 @app.websocket("/ws/transcribe")
 async def ws_transcribe(websocket: WebSocket):
     await websocket.accept()
-    session = StreamingSession(state["models"], state["scheduler"], state["vad"], settings)
-    metrics.gauge("stt_sessions_active", metrics.counter_value("stt_sessions_active") + 1)
+    session = StreamingSession(state["model"], state["scheduler"], state["vad"], settings)
+    metrics.gauge("stt_sessions_active", metrics.gauge_value("stt_sessions_active") + 1)
 
     try:
         while True:
@@ -128,11 +126,13 @@ async def ws_transcribe(websocket: WebSocket):
                 for result in await session.feed(data):
                     await websocket.send_json(result)
             elif text_msg is not None and text_msg.strip().lower() == "end":
-                result = await session.flush()
-                if result:
-                    await websocket.send_json(result)
+                # `flush` responde siempre, vacío incluido: el cliente pidió
+                # cerrar el utterance, y un `end` sin respuesta lo deja
+                # esperando una transcripción que no iba a llegar nunca (ver
+                # `StreamingSession.flush`).
+                await websocket.send_json(await session.flush())
     except WebSocketDisconnect:
         pass
     finally:
-        metrics.gauge("stt_sessions_active", max(0.0, metrics.counter_value("stt_sessions_active") - 1))
+        metrics.gauge("stt_sessions_active", max(0.0, metrics.gauge_value("stt_sessions_active") - 1))
         metrics.counter("stt_sessions_total")

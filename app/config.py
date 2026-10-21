@@ -17,13 +17,11 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-# Perfil de tiempo real. Cuando está activo, los cinco parámetros que dominan la
-# latencia cambian de default a valores que priorizan "que el usuario vea la
-# seña ya" sobre "que el transcriber no se equivoque". Cualquier variable de
-# entorno sigue mandando sobre el perfil, así que un despliegue concreto puede
-# pedir latencia y corrección a la vez. El detalle de cada valor medido está en
-# `docs/performance.md`.
-REALTIME = _env_bool("REALTIME", True)
+# El servicio no tiene un "perfil de tiempo real". El 14 de octubre se agrandó
+# uno que cambiaba cinco defaults según una bandera, y la bandera no era una
+# reversión: `docker-compose.yml` fijaba los valores del perfil uno por uno, así
+# que poner `REALTIME=false` solo cambiaba una cosa de las seis. La latencia se
+# ajusta overrindiendo cada variable, que es lo que hace el compose.
 
 
 @dataclass(frozen=True)
@@ -39,34 +37,25 @@ class Settings:
     COMPUTE_TYPE: str = os.getenv("COMPUTE_TYPE", "float16")
     LANGUAGE: str = os.getenv("LANGUAGE", "es")
 
-    # Modelo aparte para los parciales. El parcial se tira a la basura en cuanto
-    # llega el final, así que no necesita la precisión de `MODEL_SIZE`: un
-    # modelo chico cuesta ~3x menos y eso es directamente menos espera para el
-    # usuario. Vacio = usar el mismo modelo para todo (comportamiento previo).
-    PARTIAL_MODEL_SIZE: str = os.getenv("PARTIAL_MODEL_SIZE", "small")
-    PARTIAL_COMPUTE_TYPE: str = os.getenv("PARTIAL_COMPUTE_TYPE", "float16")
-
     VAD_AGGRESSIVENESS: int = _env_int("VAD_AGGRESSIVENESS", 2)
-    # El hangover de silencio es el mayor termino de la latencia: son los ms que
-    # el pipeline espera despues de que la persona termino de hablar. 600 ms es
-    # el piso por debajo del cual una pausa natural entre palabras parte la
-    # frase en dos, o sea el trade-off correcto para señas (que se pueden encadenar).
-    SILENCE_TIMEOUT_MS: int = _env_int("SILENCE_TIMEOUT_MS", 600 if REALTIME else 1500)
-    # El intervalo real de un parcial es este + la inferencia anterior, porque
-    # solo hay una inferencia parcial en vuelo por sesion. Bajarlo de 400 a 250
-    # compra un parcial mas rapido sin cambiar la concurrencia.
-    PARTIAL_INTERVAL_MS: int = _env_int("PARTIAL_INTERVAL_MS", 250 if REALTIME else 400)  # 0 = desactivados
-    MIN_AUDIO_MS_FOR_PARTIAL: int = _env_int("MIN_AUDIO_MS_FOR_PARTIAL", 160)
+    # 1500 ms es el valor del diagrama 6.3 del SDD y el que tiene el compose. Es
+    # el mayor término de la latencia —son los ms que se espera después de que la
+    # persona terminó de hablar—, pero bajarlo a 600 parte las frases en los
+    # puntos donde la persona respira, y una frase partida son dos señas.
+    SILENCE_TIMEOUT_MS: int = _env_int("SILENCE_TIMEOUT_MS", 1500)
+    # Los parciales se quedan (RF-STT-02, del 30 de septiembre: anteriores al
+    # perfil de tiempo real). El texto se muestra progresivo porque es un
+    # requisito, no porque sirva para representar antes.
+    PARTIAL_INTERVAL_MS: int = _env_int("PARTIAL_INTERVAL_MS", 400)  # 0 = parciales desactivados
+    MIN_AUDIO_MS_FOR_PARTIAL: int = _env_int("MIN_AUDIO_MS_FOR_PARTIAL", 200)
     MAX_BUFFER_MS: int = _env_int("MAX_BUFFER_MS", 8000)
     # Pausa mínima donde se corta una frase que llega a MAX_BUFFER_MS
     CUT_PAUSE_MIN_MS: int = _env_int("CUT_PAUSE_MIN_MS", 150)
-    # Inicio de habla: ventana reciente y proporción mínima de frames con habla.
-    # En tiempo real la ventana se acorta a 150 ms: son 150 ms que el usuario
-    # espera sin que exista siquiera un buffer del cual sacar un parcial.
-    SPEECH_ONSET_WINDOW_MS: int = _env_int("SPEECH_ONSET_WINDOW_MS", 150 if REALTIME else 300)
-    SPEECH_ONSET_RATIO: float = _env_float("SPEECH_ONSET_RATIO", 0.7 if REALTIME else 0.9)
+    # Inicio de habla: ventana reciente y proporción mínima de frames con habla
+    SPEECH_ONSET_WINDOW_MS: int = _env_int("SPEECH_ONSET_WINDOW_MS", 300)
+    SPEECH_ONSET_RATIO: float = _env_float("SPEECH_ONSET_RATIO", 0.9)
     # Silencio final que se conserva al transcribir el final
-    FINAL_TRAILING_SILENCE_KEEP_MS: int = _env_int("FINAL_TRAILING_SILENCE_KEEP_MS", 120)
+    FINAL_TRAILING_SILENCE_KEEP_MS: int = _env_int("FINAL_TRAILING_SILENCE_KEEP_MS", 300)
 
     BEAM_SIZE: int = _env_int("BEAM_SIZE", 1)
     INITIAL_PROMPT: str | None = os.getenv("INITIAL_PROMPT") or None
@@ -76,19 +65,27 @@ class Settings:
     MIN_RMS_PERCENTILE: float = _env_float("MIN_RMS_PERCENTILE", 90)
     NO_SPEECH_THRESHOLD: float = _env_float("NO_SPEECH_THRESHOLD", 0.6)
     # -1.0 es el default de faster-whisper y de whisper mismo. El valor anterior
-    # (-0.8) descartaba frases enteras que el modelo si habia transcrito bien:
-    # en los fixtures de `scripts/make_audio_fixtures.py` se comia "como estas"
-    # y "estoy triste", que luego salen como transcripcion vacia. Descartar audio
-    # real es peor que aceptar una frase dudosa, asi que se vuelve al default y
+    # (-0.8) descartaba frases enteras que el modelo sí había transcrito bien: en
+    # los fixtures de `scripts/make_audio_fixtures.py` se comía "cómo estás" y
+    # "estoy triste", que luego salen como transcripción vacía. Descartar audio
+    # real es peor que aceptar una frase dudosa, así que se vuelve al default y
     # el filtro se limita a descartar silencio de verdad.
     AVG_LOGPROB_THRESHOLD: float = _env_float("AVG_LOGPROB_THRESHOLD", -1.0)
 
-    # Timestamps por palabra. Cuestan un alineamiento con atencion cruzada por
-    # segmento, pero son los que le dicen al backend que palabra ya se termino
-    # de decir y cual es la que todavia se esta formando: sin eso, la unica
-    # regla posible es "no firmes la ultima palabra", que es una aproximacion.
-    # El detalle del costo medido esta en `docs/performance.md`.
-    WORD_TIMESTAMPS: bool = _env_bool("WORD_TIMESTAMPS", True)
+    # Timestamps por palabra. Cuestan un alineamiento con atención cruzada por
+    # segmento y salen en el payload, así que están apagados por defecto.
+    #
+    # Nadie los lee: existían para que el backend decidiera qué parte de la frase
+    # ya se había terminado de decir, que era la regla del camino por fragmentos.
+    # Con la unidad de traducción siendo la oración, la frase se representa cuando
+    # termina, no a mitad de camino, y el backend ya no mira el campo.
+    #
+    # Se deja el ajuste y no se borra el código porque es la forma de volver a
+    # pedir los tiempos sin tocar nada, y porque `scripts/make_audio_fixtures.py`
+    # y el endpoint `/transcribe` los muestran para diagnosticar una transcripción
+    # rara. Si algún día no los quiere nadie, se borran acá y en
+    # `TranscriptionResult.to_payload`: el backend los parsea de forma tolerante.
+    WORD_TIMESTAMPS: bool = _env_bool("WORD_TIMESTAMPS", False)
 
     # Cantidad maxima de inferencias simultaneas en la GPU. Whisper serializa
     # igual por debajo (CTranslate2 con num_workers=1), pero sin este limite
@@ -104,14 +101,6 @@ class Settings:
     @property
     def bytes_per_frame(self) -> int:
         return self.frame_size * 2  # PCM16 = 2 bytes por muestra
-
-    @property
-    def partial_model_size(self) -> str:
-        return self.PARTIAL_MODEL_SIZE or self.MODEL_SIZE
-
-    @property
-    def partial_compute_type(self) -> str:
-        return self.PARTIAL_COMPUTE_TYPE if self.PARTIAL_MODEL_SIZE else self.COMPUTE_TYPE
 
 
 settings = Settings()

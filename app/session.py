@@ -4,10 +4,9 @@ Reemplaza el par de hilos + globals compartidos del script original por una
 sesión aislada por cliente, ya que el servicio puede atender varias conexiones
 WebSocket concurrentes (una por cada cliente móvil).
 
-Tres decisiones de este archivo explican casi toda la latencia del tramo
-hablado:
+Dos decisiones de este archivo no dependen de con qué ritmo hable la persona:
 
-1. **El buffer crece con `list.append`, no con `np.concatenate`.** La version
+1. **El buffer crece con `list.append`, no con `np.concatenate`.** La versión
    anterior concatenaba el frame de 30 ms contra el buffer completo en cada
    frame: para 8 s de habla son ~270 concatenaciones de un arreglo que llega a
    128k muestras, o sea ~68 MB de memcpy, y todo en el hilo del bucle de
@@ -15,16 +14,13 @@ hablado:
    Ahora se acumula en una lista y se junta una sola vez, cuando toca
    transcribir.
 
-2. **Los parciales se marcan como descartables.** Cuando entra audio nuevo, el
-   parcial que estaba en vuelo se cancela si todavia no empezo a usar la GPU.
-   En tiempo real eso es la diferencia entre "el texto de la palabra anterior" y
-   "el texto del silencio actual": un parcial de 700 ms de antiguedad ya no le
-   sirve a nadie.
+2. **Un parcial en vuelo no se entrega si su frase ya cerró.** Cuando el
+   utterance se cierra, el parcial que estaba corriendo describe un buffer viejo
+   y su texto confundiría al backend, así que se descarta. Además se cancela si
+   todavía no llegó a la GPU, para que no quede encolado delante del final.
 
-3. **Cada mensaje lleva `words` con el instante de cada palabra.** El backend
-   lo usa para decidir que parte de la frase ya se termino de decir. Es la
-   diferencia entre "firmar todo menos la ultima palabra" (heuristica) y
-   "firmar lo que ya empezo a dejar de sonar" (medido).
+Lo que este archivo **no** decide es qué se representa: eso es del backend, que
+divide la frase en oraciones cuando el cliente se la manda como `text`.
 """
 
 import asyncio
@@ -51,12 +47,12 @@ class StreamingSession:
 
     def __init__(
         self,
-        models: dict[str, WhisperModel],
+        model: WhisperModel,
         scheduler: InferenceScheduler,
         vad: webrtcvad.Vad,
         settings: Settings,
     ):
-        self._models = models
+        self._model = model
         self._scheduler = scheduler
         self._vad = vad
         self._settings = settings
@@ -70,12 +66,13 @@ class StreamingSession:
         self._silence_ms = 0
         self._last_partial_time = time.monotonic()
 
-        self._first_chunk_at: float | None = None
         self._received_audio_ms = 0
         # Foto del audio recibido en el instante en que arrancó la última
         # inferencia. Es la referencia de `_lag_ms`.
         self._backlog_snapshot_ms: float | None = None
-        self._speech_end_audio_ms = 0
+        # Reloj de pared del último frame que el VAD marcó como voz. Es la
+        # referencia de `stt_end_to_final_ms` (ver `_log_final`).
+        self._speech_end_at: float | None = None
 
         onset_frames = max(1, settings.SPEECH_ONSET_WINDOW_MS // settings.FRAME_DURATION_MS)
         self._onset_window: deque[tuple[np.ndarray, bool]] = deque(maxlen=onset_frames)
@@ -89,8 +86,6 @@ class StreamingSession:
     # ---------------------------------------------------------------- audio
 
     async def feed(self, chunk: bytes) -> list[dict]:
-        if self._first_chunk_at is None:
-            self._first_chunk_at = time.monotonic()
         self._pcm_buffer.extend(chunk)
         results = []
         metrics.counter("stt_audio_bytes_total", len(chunk))
@@ -110,23 +105,43 @@ class StreamingSession:
 
         return results
 
-    async def flush(self) -> dict | None:
-        """Cierra el utterance actual por pedido explicito del cliente.
+    async def flush(self) -> dict:
+        """Cierra el utterance actual por pedido explícito del cliente.
 
-        Es el atajo de baja latencia: el cliente (el boton del microfono)
-        avisa que solto y se salta el hangover de silencio. Sin esto, soltar el
-        microfono a mitad de frase obligaba a esperar `SILENCE_TIMEOUT_MS` a un
+        Es el atajo de baja latencia: el cliente (el botón del micrófono) avisa
+        que soltó y se salta el hangover de silencio. Sin esto, soltar el
+        micrófono a mitad de frase obligaba a esperar `SILENCE_TIMEOUT_MS` a un
         silencio que ya no iba a llegar.
+
+        **Este es el único camino que responde siempre**, vacío incluido, porque
+        es el único en el que el cliente preguntó. Los dos casos por los que
+        antes se callaba son los dos casos normales de soltar el micrófono:
+
+        - El filtro de descarte se comió el audio (`no_speech`, `logprob`,
+          `rms`). Es lo que pasa al soltar el micrófono sobre ruido: la frase se
+          cerró y no tenía palabras, y eso es una respuesta.
+        - Ya no queda audio pendiente porque el silencio la cerró antes. El `end`
+          del cliente llega tarde, no en balde.
+
+        Antes, en los dos casos, no salía nada y quien se quedaba esperando era el
+        cliente: su red de seguridad ("no llegó la transcripción") reportaba como
+        perdida una frase que nunca existió. Un final vacío es una respuesta
+        válida y el backend ya la reenvía tal cual.
+
+        El camino por silencio (`feed`) sigue descartando los vacíos: ahí nadie
+        está preguntando y mandarlos sería ruido en la conexión.
         """
         if self._speech_samples == 0:
-            return None
+            result = TranscriptionResult("", drop_reason="empty")
+            self._log_final("flush", result, self._lag_ms())
+            return result.to_payload("final")
 
         buffer_copy = self._trim_trailing_silence(self._speech_audio(), self._silence_ms)
         self._end_speech()
 
-        result = await self._transcribe(buffer_copy, priority=PRIORITY_FINAL, kind="final")
+        result = await self._transcribe(buffer_copy, priority=PRIORITY_FINAL)
         self._log_final("flush", result, self._lag_ms())
-        return result.to_payload("final") if result.text else None
+        return result.to_payload("final")
 
     # -------------------------------------------------------------uttokens
 
@@ -143,23 +158,22 @@ class StreamingSession:
         speech_detected = vad_speech and frame_rms >= self._settings.MIN_RMS
 
         self._received_audio_ms += self._settings.FRAME_DURATION_MS
+        now = time.monotonic()
 
         if not self._is_speaking:
-            self._detect_speech_onset(frame_float, speech_detected)
+            self._detect_speech_onset(frame_float, speech_detected, now)
         elif speech_detected:
             self._append_speech(frame_float)
             self._frame_flags.append(True)
             self._silence_ms = 0
             self._speech_since_partial = True
+            self._speech_end_at = now
         else:
-            if self._silence_ms == 0:
-                self._speech_end_audio_ms = self._received_audio_ms - self._settings.FRAME_DURATION_MS
             self._append_speech(frame_float)
             self._frame_flags.append(False)
             self._silence_ms += self._settings.FRAME_DURATION_MS
 
         buffer_ms = self._speech_samples / self._settings.SAMPLE_RATE * 1000
-        now = time.monotonic()
 
         do_final = self._is_speaking and (
             self._silence_ms >= self._settings.SILENCE_TIMEOUT_MS
@@ -168,12 +182,14 @@ class StreamingSession:
         if do_final:
             audio, reason = self._take_final_audio()
             lag_ms = self._lag_ms()
-            # El parcial en vuelo ya no sirve para nada: el utterance cerro y su
+            # El parcial en vuelo ya no sirve para nada: el utterance cerró y su
             # texto, si llega, va a describir un buffer viejo. Tirarlo libera la
-            # GPU para el final, que es lo que el usuario esta esperando.
+            # GPU para el final, que es lo que el usuario está esperando.
             self._cancel_partial()
-            result = await self._transcribe(audio, priority=PRIORITY_FINAL, kind="final")
+            result = await self._transcribe(audio, priority=PRIORITY_FINAL)
             self._log_final(reason, result, lag_ms)
+            # El silencio lo cerró solo: nadie preguntó, así que un final vacío
+            # no se manda. `flush()` es el camino que sí responde siempre.
             return result.to_payload("final") if result.text else None
 
         do_partial = (
@@ -221,7 +237,12 @@ class StreamingSession:
         self._speech_chunks = [audio]
         return audio
 
-    def _detect_speech_onset(self, frame_float: np.ndarray, speech_detected: bool) -> None:
+    def _detect_speech_onset(
+        self,
+        frame_float: np.ndarray,
+        speech_detected: bool,
+        now: float,
+    ) -> None:
         self._onset_window.append((frame_float, speech_detected))
         speech_frames = sum(1 for _, is_speech in self._onset_window if is_speech)
         window_full = len(self._onset_window) == self._onset_window.maxlen
@@ -231,6 +252,12 @@ class StreamingSession:
         for frame, _ in self._onset_window:
             self._append_speech(frame)
         self._frame_flags = [is_speech for _, is_speech in self._onset_window]
+        # Los frames de la ventana son los únicos que traversed esta rama, así
+        # que el reloj de "dejaste de hablar" se actualiza acá. Solo si el frame
+        # actual es voz: si la ventana cerró en silencio, el último frame de voz
+        # llegó hasta `SPEECH_ONSET_WINDOW_MS` antes y no hay con qué ser exacto.
+        if speech_detected:
+            self._speech_end_at = now
         self._onset_window.clear()
         self._is_speaking = True
         self._silence_ms = 0
@@ -298,9 +325,7 @@ class StreamingSession:
 
     # --------------------------------------------------------- transcripcion
 
-    async def _transcribe(self, audio: np.ndarray, priority: int, kind: str) -> TranscriptionResult:
-        model_key = "partial" if kind == "partial" and "partial" in self._models else "final"
-        model = self._models[model_key]
+    async def _transcribe(self, audio: np.ndarray, priority: int) -> TranscriptionResult:
         # La foto se toma acá, cuando la inferencia **empieza** a correr, y no
         # cuando se despacha: la espera por la GPU ya la mide
         # `stt_partial_queue_ms`, y sumar las dos sería contar el atraso dos
@@ -309,20 +334,17 @@ class StreamingSession:
         return await self._scheduler.run(
             priority,
             transcribe_buffer,
-            model,
+            self._model,
             audio,
             self._settings,
-            self._models_key_name(model_key),
+            self._settings.MODEL_SIZE,
         )
-
-    def _models_key_name(self, model_key: str) -> str:
-        return self._settings.partial_model_size if model_key == "partial" else self._settings.MODEL_SIZE
 
     async def _run_partial(self, buffer_copy: np.ndarray, buffer_ms: float, utterance_id: int) -> None:
         lag_ms = self._lag_ms()
         queued_at = time.perf_counter()
         try:
-            result = await self._transcribe(buffer_copy, priority=PRIORITY_PARTIAL, kind="partial")
+            result = await self._transcribe(buffer_copy, priority=PRIORITY_PARTIAL)
         except asyncio.CancelledError:
             metrics.counter("stt_partial_cancelled_total")
             raise
@@ -388,11 +410,15 @@ class StreamingSession:
             f"[timing] final ({reason}): audio={result.audio_ms / 1000:.1f}s "
             f"transcripcion={result.elapsed_ms:.0f}ms atraso={lag_ms:.0f}ms"
         )
-        if reason == "silencio" and self._first_chunk_at is not None:
-            speech_end_at = self._first_chunk_at + self._speech_end_audio_ms / 1000
-            end_to_final_ms = (time.monotonic() - speech_end_at) * 1000
+        if self._speech_end_at is not None:
+            end_to_final_ms = (time.monotonic() - self._speech_end_at) * 1000
             line += f" fin_habla->final={end_to_final_ms:.0f}ms"
-            metrics.histogram("stt_end_to_final_ms", end_to_final_ms, "Dejar de hablar a final disponible")
+            metrics.histogram(
+                "stt_end_to_final_ms",
+                end_to_final_ms,
+                "Dejar de hablar a final disponible",
+                {"reason": reason},
+            )
         if result.drop_reason:
             line += f" descartado={result.drop_reason}"
 

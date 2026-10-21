@@ -216,143 +216,82 @@ vez; si se repite, se ajusta con `SPEECH_ONSET_WINDOW_MS`.
 
 ---
 
-## 8. Perfil de tiempo real
+## 8. Vuelta al flujo por oraciones: qué de la latencia se queda y qué no
 
-**Fecha:** 2026-10-14
-**GTX/RTX 4050**, Whisper `medium` (finales) + `small` (parciales), CUDA float16.
+**Fecha:** 2026-10-15
+**Plan:** `sign-ai-docs/auditoria-flujo-2026-10-15.md` §6.2
 
-El objetivo dejó de ser "optimizar una espera" y pasó a ser que la app
-firme **mientras la persona habla**. Eso cambió el perfil entero.
+Entre el 13 y el 14 de octubre este servicio corrió con un perfil de tiempo
+real: cinco defaults cambiados (silencio 600 ms, parciales cada 250 ms, ventana
+de inicio 150 ms al 0.7, 120 ms de silencio final conservado), un segundo modelo
+`small` para los parciales y los timestamps por palabra. La unidad de traducción
+del backend pasó a ser el fragmento y el avatar firmaba mientras la persona
+hablaba.
 
-| | Antes | Ahora |
-|---|---:|---:|
-| Fin del habla → transcripción final | 1813 – 2099 ms | **p50 839 / p95 958 / max 1093 ms** |
-| Inferencia de un parcial | 350 – 630 ms | **p50 92 / p95 172 ms** |
-| Inferencia de un final | 246 – 332 ms | p50 249 / p95 338 ms |
-| Espera por la GPU | picos de 4 – 8 s | **p50 0.4 / p95 0.8 ms** |
-| Audio acumulado sin procesar | — | p50 −21 ms (sin acumulación) |
-| Costo del VAD por frame | — | p50 0.07 ms |
+Ese camino no aparece en ningún diagrama del SDD ni en los requisitos, así que
+se desarmó y la rama quedó en `flujo-oraciones`. La entrada 7 de esta bitácora
+y las seis anteriores **no se tocan**: describen valores que siguen en pie.
 
-Medido sobre los 28 fixtures de `scripts/make_audio_fixtures.py`,
-reproducidos a velocidad real por el WebSocket del backend.
+### Lo que se conserva, y por qué no es del perfil de tiempo real
 
-### Descomposición del fin del habla al final
+**El umbral de logprob, en `-1.0`.** A `-0.8` el filtro descartaba frases que el
+modelo había transcrito bien: sobre los fixtures de
+`scripts/make_audio_fixtures.py` se comía "cómo estás" y "estoy triste", que
+llegaban como transcripción vacía sin dejar rastro. Descartar audio real es
+peor que aceptar una frase dudosa. Es el default de faster-whisper y de
+whisper mismo, y el valor de referencia para el filtro pasó a ser `no_speech`.
 
-| Término | Antes | Ahora | Por qué |
-|---|---:|---:|---|
-| Hangover de silencio | 1500 ms | **600 ms** | `SILENCE_TIMEOUT_MS`. El piso por debajo del cual una pausa natural entre palabras parte la frase. |
-| Ventana de onset | 300 ms | **150 ms** | `SPEECH_ONSET_WINDOW_MS`. Son 150 ms en los que no existe siquiera un buffer del cual sacar un parcial. |
-| Inferencia | 350 – 630 ms | **249 – 338 ms** | Whisper siempre paga su ventana de 30 s, complete o no el buffer. |
+**El buffer con `list.append`.** Antes cada frame de 30 ms se concatenaba contra
+el buffer completo: para 8 s de habla son ~270 concatenaciones de un arreglo que
+llega a 128k muestras, ~68 MB de memcpy, en el hilo del bucle de eventos. Eso
+bloqueaba la VAD de *todas* las conexiones, no solo la propia. Es un bug de
+concurrencia (RNF-REL-01), no una decisión de latencia.
 
-### `InferenceScheduler`
+**El `InferenceScheduler`.** Sin orden explícito, el orden de llegada es el
+orden de ejecución: un parcial que arrancó antes que un final se ejecutaba
+primero. Con `MAX_CONCURRENT_INFERENCE=1` es un envoltorio sin efecto sobre el
+tiempo, y su valor aparece cuando hay más de una sesión. Se conserva entero.
 
-El descubrimiento que lo justificó: **CTranslate2 serializa igual** por
-abajo (`num_workers=1`), así que sin un orden explícito el orden de
-ejecución es el de llegada. Un parcial despachado 100 ms antes que un
-final se ejecuta primero, y el usuario espera los dos. La entrada 4 de
-este documento ya medía picos de 4 a 8 s.
+**El motivo del descarte y la métrica de atraso.** `TranscriptionResult` dice si
+el final se descartó por `rms`, `no_speech`, `logprob` o `empty`, y `_lag_ms`
+mide *audio recibido menos el que ya estaba en el buffer cuando arrancó la
+inferencia*. Antes medía contra el reloj de la sesión, lo que mezclaba dos cosas
+sin relación: con el micrófono apagado 20 s el número llegaba a 20000 ms y
+parecía una GPU saturada, y al reproducir más rápido que tiempo real salía
+negativo. Sin ese dato, un final vacío es indistinguible de un micrófono roto.
 
-La solución no es más concurrencia sino **orden**: una cola priorizada
-donde `PRIORITY_FINAL` salta a los parciales que todavía no empezaron. El
-parcial que ya está usando la GPU se deja terminar — cancelarlo a mitad
-cuesta una GPU desperdiciada y no ahorra nada.
+**El `end` que siempre responde.** Vacío incluido. Es lo que hace el botón del
+micrófono de la app: sin respuesta, el cliente se come su propio timeout y
+reporta como fallida una frase que nunca existió.
 
-Resultado: `stt_partial_queue_ms` pasó de picos de 4 – 8 s a p95 0.8 ms.
+### Lo que se va
 
-### Dos modelos
+| | En el perfil | Ahora |
+|---|---|---|
+| `SILENCE_TIMEOUT_MS` | 600 ms | **1500 ms**, el del diagrama 6.3 |
+| `PARTIAL_INTERVAL_MS` | 250 ms | 400 ms |
+| `SPEECH_ONSET_WINDOW_MS` / `_RATIO` | 150 ms / 0.7 | 300 ms / 0.9 |
+| `FINAL_TRAILING_SILENCE_KEEP_MS` | 120 ms | 300 ms |
+| `MIN_AUDIO_MS_FOR_PARTIAL` | 160 ms | 200 ms |
+| Modelos | dos (`medium` + `small`) | uno |
+| `WORD_TIMESTAMPS` | `true` | `false` |
 
-| Modelo | Uso | Inferencia |
-|---|---|---:|
-| `small` | parciales | p50 92 ms |
-| `medium` | finales | p50 249 ms |
+Los parciales **se quedan**: son RF-STT-02 y son del 30 de septiembre,
+anteriores al perfil. El texto se muestra progresivo porque es un requisito, no
+porque sirva para representar antes.
 
-Un parcial se tira a la basura en cuanto llega el final, así que no
-necesita la precisión de `medium`. `PARTIAL_MODEL_SIZE` vacío (o igual a
-`MODEL_SIZE`) deja un solo modelo, que es lo que se hacía antes y lo que
-corresponde si la VRAM no alcanza para dos.
+### Lo que hay que remedir antes de comparar
 
-Precalentado: 96 ms el modelo de parciales, 488 ms el de finales. Se hace
-en el arranque, en el hilo del lifespan, para que la primera frase real no
-pague la compilación de kernels de CUDA.
+Las cifras del perfil de tiempo real (fin del habla → final **p50 839 ms /
+p95 958 ms**, inferencia de un parcial **p50 92 ms**, espera por la GPU
+**p95 0.8 ms**) **no son comparables** con las de ahora: el silencio era de 600
+ms en vez de 1500, y 600 ms es exactamente el término que se quitó. Repetir la
+medición con `SILENCE_TIMEOUT_MS=1500` y un solo modelo antes de sacar ninguna
+conclusión. La entrada 7 sigue siendo la referencia de referencia: 1813–2099 ms
+de fin del habla a final disponible.
 
-### El filtro que se comía audio real
-
-`AVG_LOGPROB_THRESHOLD` estaba en `-0.8`, más estricto que el default de
-Whisper (`-1.0`). Medido sobre los fixtures, hacía que **"cómo estás" y
-"estoy triste" salieran como transcripción vacía**, aunque el modelo las
-había transcrito bien por `POST /transcribe`. Un final vacío es
-indistinguible de un micrófono roto, que es exactamente la clase de
-fallo que hace perder el tiempo de un agente.
-
-Volvió a `-1.0`, y `transcribe_buffer` ahora devuelve `drop_reason` para
-que un vacío se pueda explicar: `rms` (audio en silencio), `no_speech`
-(el modelo lo considera silencio) o `logprob` (confianza baja).
-
-Mirar `stt_dropped_total{reason="logprob"}` en `/metrics` es el guard: si
-sube, el filtro se está comiendo audio transcrito correctamente.
-
-### Timestamps por palabra
-
-Cada parcial y final lleva ahora `words: [{w, s, e}]` y `audio_ms`. No
-es un detalle del protocolo: es lo que le permite al backend decidir qué
-palabra ya terminó de decirse en vez de tener que suponer "todo menos la
-última".
-
-Costo medido: despreciable. El alineamiento con atención cruzada ya está
-en la pasada de decodificación.
-
-### El buffer O(n²)
-
-El buffer de habla concatenaba el frame de 30 ms contra el arreglo
-completo en cada frame: para 8 s de utterances son ~270 concatenaciones de
-un arreglo que llega a 128k muestras, unos 68 MB de memcpy, **todo en el
-hilo del bucle de eventos**. Ese hilo es compartido por todas las
-conexiones, así que una sesión saturada retrasaba la VAD de las demás.
-
-Ahora acumula en una lista y junta una sola vez, al transcribir. El costo
-medido del VAD por frame (0.07 ms) confirma que ya no hay trabajo pesado
-en el bucle.
-
-### Pendiente
-
-- **Varias sesiones simultáneas.** Todo se midió con una. Con varias
-  comparten la GPU y el scheduler las serializa, así que el tiempo por
-  cliente sube linealmente. Con `medium` (1.5 GB de VRAM) entran bien
-  varias en una GPU de 6 GB.
-- **`PARTIAL_MODEL_SIZE=base` o `tiny`.** Aún más rápido, a costa de
-  parciales bastante más ruidosos. No se midió.
-- **Cancelar un parcial en vuelo.** Se hace cuando el utterance cierra,
-  pero solo descarta el resultado: el hilo de la GPU sigue hasta que
-  CTranslate2 termina, porque ahí no se puede interrumpir a mitad.
-
-### Corrección: `stt_partial_lag_ms` medía algo que no era atraso
-
-**Fecha:** 2026-10-14, tarde. Found it en la primera prueba con voz real.
-
-La métrica era `tiempo real desde el primer frame − audio recibido`. Suena a
-saturación pero mezcla dos cosas sin relación: si el cliente **deja de mandar
-audio** (apagó el micrófono, cerró la app, se cortó el cable), el reloj sigue
-corriendo y el audio no, así que el número crece sin que haya nada que
-procesar. En la prueba con voz real, p95 = 13091 ms y max = 27332 ms eran casi
-todos segundos de micrófono apagado. Reproducir un fixture salía **negativo**
-(−27 ms), porque el replay manda más rápido que tiempo real.
-
-Ahora es *audio recibido menos el que ya estaba en el buffer cuando arrancó la
-inferencia*, con la foto tomada en `_transcribe()` — cuando la inferencia
-**empieza**, no cuando se despacha, porque la espera por la GPU ya la mide
-`stt_partial_queue_ms` y sumarlas las dos contaría el atraso dos veces.
-
-| | Antes (con voz real) | Ahora (28 fixtures) |
-|---|---:|---:|
-| `stt_partial_lag_ms` p50 | 1.4 ms | 360 ms |
-| `stt_partial_lag_ms` p95 | 13091 ms | 390 ms |
-| `stt_partial_lag_ms` max | 27332 ms | 630 ms |
-
-Los 360 ms de p50 son los ~250 ms que tarda `medium` en un final y ~90 ms en un
-parcial de `small`: el audio real que entra mientras Whisper trabaja. Es el piso
-físico del costo de una inferencia, no un problema. Si esta métrica sube de ahí,
-el culpable es el modelo o la cola, y `stt_inference_ms` /
-`stt_partial_queue_ms` dicen cuál.
-
-`_processed_audio_ms` pasó a llamarse `_received_audio_ms`: nunca procesó nada,
-era la posición del audio en la línea de tiempo.
+con los valores de ahora, sobre los fixtures y por la pila completa, el final
+sale entre 205 y 227 ms de inferencia y la espera por la GPU es de ~1 ms. Eso no
+es una cifra de latencia de titular: le faltan los 1500 ms de silencio más lo
+que el backend tarde en traducir. Para ese número hay que medir
+`stt_end_to_final_ms` y `rt_first_sign_ms` juntos, que están en los dos servicios.

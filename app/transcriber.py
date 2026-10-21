@@ -1,19 +1,25 @@
 """Carga del modelo Whisper y transcripción de buffers de audio.
 
-Dos cosas perecen a la latencia viven acá y en ningún otro lado:
+Dos decisiones de acá no dependen de con qué ritmo hable la persona:
 
-1. **Quién tiene la GPU.** `InferenceScheduler` es el unico punto por el que
+1. **Quién tiene la GPU.** `InferenceScheduler` es el único punto por el que
    pasa toda inferencia. Whisper internamente serializa igual (CTranslate2 con
-   `num_workers=1`), pero sin un orden explicito el orden de llegada es el
-   orden de ejecucion: un parcial que empezo antes que un final se ejecuta
-   antes que el, y lo demostro `docs/performance.md` con picos de 4 a 8
-   segundos. Con el scheduler, un final salta la cola de parciales.
+   `num_workers=1`), pero sin un orden explícito el orden de llegada es el
+   orden de ejecución: un parcial que empezó antes que un final se ejecuta antes
+   que él, y lo demostró `docs/performance.md` con picos de 4 a 8 segundos. Con
+   el scheduler, un final salta la cola de parciales. El servicio atiende varias
+   conexiones (RNF-REL-01), así que este orden decide cuánto espera cada
+   usuario, no solo el primero.
 
-2. **Que se descarta y por que.** `transcribe_buffer` devuelve un
-   `TranscriptionResult` con el motivo del descarte y los timestamps por
-   palabra, no solo el string. Un `""` sin explicación es indistinguible de un
-   silencio real, y esa indistinción es la razon por la que dos frases de los
-   fixtures se perdian sin dejar rastro.
+2. **Qué se descarta y por qué.** `transcribe_buffer` devuelve un
+   `TranscriptionResult` con el motivo del descarte, no solo el string. Un `""`
+   sin explicación es indistinguible de un silencio real, y esa indistinción es
+   la razón por la que dos frases de los fixtures se perdían sin dejar rastro.
+
+Los timestamps por palabra (`WordTiming`) vinieron con el camino que decidía
+qué palabra ya había terminado de decir. Ese camino no está: hoy nadie los lee
+y `WORD_TIMESTAMPS` está apagado. Quedan porque son la forma de volver a pedirlos
+y porque el endpoint `/transcribe` los usa para diagnosticar.
 """
 
 import asyncio
@@ -65,9 +71,11 @@ class TranscriptionResult:
     def to_payload(self, kind: str) -> dict[str, Any]:
         """El frame JSON que va por el WebSocket.
 
-        Los campos nuevos (`words`, `audio_ms`) son aditivos: el backend los
-        ignora si no los entiende, y el `text` sigue siendo el campo que el
-        cliente de referencia ya leia.
+        `text` es el campo que el cliente de referencia ya leía y el único que el
+        backend necesita: él divide la frase en oraciones y las traduce, así que
+        la unidad de este lado es la frase completa. `audio_ms` es aditivo y le
+        sirve al cliente para saber cuánto audio se procesó. `words` solo aparece
+        con `WORD_TIMESTAMPS=true` y hoy nadie lo lee.
         """
         payload: dict[str, Any] = {"type": kind, "text": self.text}
         if self.words:
@@ -76,40 +84,31 @@ class TranscriptionResult:
         return payload
 
 
-def load_model(settings: Settings, model_size: str | None = None, compute_type: str | None = None) -> WhisperModel:
-    size = model_size or settings.MODEL_SIZE
-    compute = compute_type or settings.COMPUTE_TYPE
-    print(f"Cargando modelo {size} ({settings.DEVICE}, {compute})...", flush=True)
+def load_model(settings: Settings) -> WhisperModel:
+    """Carga el único modelo. Los finales y los parciales usan el mismo.
+
+    Hubo dos (`MODEL_SIZE` y `PARTIAL_MODEL_SIZE`, chico para los parciales)
+    porque un parcial se descarta en cuanto llega el final y no necesitaba la
+    precisión del grande. Ese criterio era del camino que representaba por
+    fragmentos; con la oración como unidad, un parcial malo se nota igual que
+    un final malo y dos modelos solo agregan VRAM y una segunda caché.
+    """
+    print(f"Cargando modelo {settings.MODEL_SIZE} ({settings.DEVICE}, {settings.COMPUTE_TYPE})...", flush=True)
     try:
-        model = WhisperModel(size, device=settings.DEVICE, compute_type=compute)
+        model = WhisperModel(settings.MODEL_SIZE, device=settings.DEVICE, compute_type=settings.COMPUTE_TYPE)
         print(f"Modelo cargado en {settings.DEVICE}.", flush=True)
         return model
     except Exception as exc:
         if settings.DEVICE == "cuda":
             print(f"[ADVERTENCIA] GPU no disponible: {exc}\nCayendo a CPU...", flush=True)
-            model = WhisperModel(size, device="cpu", compute_type="int8")
+            model = WhisperModel(settings.MODEL_SIZE, device="cpu", compute_type="int8")
             print("Modelo cargado en CPU.", flush=True)
             return model
         raise
 
 
-def load_models(settings: Settings) -> dict[str, WhisperModel]:
-    """Carga el modelo de finales y, si difiere, el de parciales.
-
-    El de parciales es opcional a proposito: en una maquina con poca VRAM cabe
-    uno solo, y en ese caso los parciales usan `MODEL_SIZE`, que es
-    exactamente el comportamiento anterior a tiempo real.
-    """
-    models = {"final": load_model(settings)}
-    if settings.partial_model_size and settings.partial_model_size != settings.MODEL_SIZE:
-        models["partial"] = load_model(settings, settings.partial_model_size, settings.partial_compute_type)
-    for key, model in models.items():
-        warm_up(model, settings, label=key)
-    return models
-
-
-def warm_up(model: WhisperModel, settings: Settings, label: str = "final") -> None:
-    """Primera inferencia deDummy, para que la real no pague la compilación de CUDA.
+def warm_up(model: WhisperModel, settings: Settings) -> None:
+    """Primera inferencia de humo, para que la real no pague la compilación de CUDA.
 
     La primera llamada a `generate()` de CTranslate2 reserva memoria, compila
     kernels y llena caches; medir eso dentro de la primer frase del usuario
@@ -121,23 +120,23 @@ def warm_up(model: WhisperModel, settings: Settings, label: str = "final") -> No
     segments, _ = model.transcribe(silence, language=settings.LANGUAGE, beam_size=settings.BEAM_SIZE)
     list(segments)  # transcribe() es perezoso
     elapsed_ms = (time.monotonic() - started) * 1000
-    print(f"Modelo '{label}' precalentado en {elapsed_ms:.0f} ms.", flush=True)
-    metrics.histogram("stt_warmup_ms", elapsed_ms, "Costo del precalentado por modelo", {"model": label})
+    print(f"Modelo precalentado en {elapsed_ms:.0f} ms.", flush=True)
+    metrics.histogram("stt_warmup_ms", elapsed_ms, "Costo del precalentado", {"model": settings.MODEL_SIZE})
 
 
 class InferenceScheduler:
-    """Unico acceso a la GPU, con prioridad para los finales.
+    """Único acceso a la GPU, con prioridad para los finales.
 
-    Por debajo hay `MAX_CONCURRENT_INFERENCE` trabajadores que toman pedidos
-    de una cola priorizada. El numero de trabajadores es deliberadamente chico:
-    CTranslate2 con `num_workers=1` ya serializa, asi que tener mas de uno en la
+    Por abajo hay `MAX_CONCURRENT_INFERENCE` trabajadores que toman pedidos de
+    una cola priorizada. El número de trabajadores es deliberadamente chico:
+    CTranslate2 con `num_workers=1` ya serializa, así que tener más de uno en la
     GPU solo agrega thrash y variabilidad.
 
-    El punto no es rendimiento, es orden. Antes de esto, una sesion con un
-    parcial en vuelo y un final recien llegado ejecutaba el parcial primero: el
-    usuario esperaba el doble. Ahora el parcial que todavia no empezo se queda
-    esperando, y el que ya empezo se deja terminar (cancelarlo a media GPU es
-    desperdicio, y el parcial ya esta paying for itself).
+    El punto no es rendimiento, es orden. Antes de esto, una sesión con un
+    parcial en vuelo y un final recién llegado ejecutaba el parcial primero: el
+    usuario esperaba los dos. Ahora el parcial que todavía no empezó se queda
+    esperando, y el que ya empezó se deja terminar (cancelarlo a media GPU es
+    desperdicio).
     """
 
     def __init__(self, limit: int = 1) -> None:

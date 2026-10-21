@@ -128,6 +128,19 @@ class MetricsRegistry:
         with self._lock:
             return self._counters.get(self._key(name, labels), 0.0)
 
+    def gauge_value(self, name: str, labels: dict[str, str] | None = None) -> float:
+        """Valor actual de un gauge.
+
+        Contadores y gauges viven en mapas separados, así que leer uno con
+        `counter_value` responde siempre 0. Eso hacia que todo gauge hecho como
+        `gauge(name, counter_value(name) + 1)` —`stt_sessions_active` y
+        `ConcurrencyGauge`— dijera 1 hagas cuántas sesiones o inferencias
+        hubiera: nunca veía su propio valor anterior. Es la clase de falla que
+        no se nota, porque "1" es un número plausible.
+        """
+        with self._lock:
+            return self._gauges.get(self._key(name, labels), 0.0)
+
     def histogram_value(self, name: str, labels: dict[str, str] | None = None) -> dict[str, Any]:
         with self._lock:
             histogram = self._histograms.get(self._key(name, labels))
@@ -252,6 +265,10 @@ class ConcurrencyGauge:
     Sube al entrar y baja al salir con `try/finally`, de modo que un
     `CancelledError` a mitad de una transcripcion no deje el contador colgado en
     un numero que jamas volveria a cero.
+
+    Sube con `gauge_value` y no con `counter_value`: son mapas separados, y leer
+    el contador daba 0 en cada entrada, asi que el gauge decia siempre 1 — con
+    seis inferencias simultaneas en vuelo seguia diciendo 1.
     """
 
     def __init__(self, name: str, help_text: str) -> None:
@@ -259,8 +276,8 @@ class ConcurrencyGauge:
         self.help = help_text
 
     def __enter__(self) -> "ConcurrencyGauge":
-        metrics.gauge(self.name, metrics.counter_value(self.name) + 1)
+        metrics.gauge(self.name, metrics.gauge_value(self.name) + 1)
         return self
 
     def __exit__(self, *exc: object) -> None:
-        metrics.gauge(self.name, max(0.0, metrics.counter_value(self.name) - 1))
+        metrics.gauge(self.name, max(0.0, metrics.gauge_value(self.name) - 1))
