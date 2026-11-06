@@ -10,7 +10,14 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from app.config import settings
 from app.metrics import metrics
 from app.session import StreamingSession
-from app.transcriber import PRIORITY_FINAL, InferenceScheduler, load_model, transcribe_buffer, warm_up
+from app.transcriber import (
+    PRIORITY_FINAL,
+    InferenceScheduler,
+    effective_device,
+    load_model,
+    transcribe_buffer,
+    warm_up,
+)
 
 state: dict = {}
 
@@ -37,7 +44,8 @@ def health():
     return {
         "status": "ok" if "model" in state else "loading",
         "model": settings.MODEL_SIZE,
-        "device": settings.DEVICE,
+        "device": effective_device(settings.DEVICE),
+        "requested_device": settings.DEVICE,
         "language": settings.LANGUAGE,
         "silence_timeout_ms": settings.SILENCE_TIMEOUT_MS,
     }
@@ -60,7 +68,8 @@ def metrics_json():
         **metrics.snapshot(),
         "config": {
             "model": settings.MODEL_SIZE,
-            "device": settings.DEVICE,
+            "device": effective_device(settings.DEVICE),
+            "requested_device": settings.DEVICE,
             "silence_timeout_ms": settings.SILENCE_TIMEOUT_MS,
             "partial_interval_ms": settings.PARTIAL_INTERVAL_MS,
             "onset_window_ms": settings.SPEECH_ONSET_WINDOW_MS,

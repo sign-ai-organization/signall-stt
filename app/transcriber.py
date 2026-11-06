@@ -40,6 +40,10 @@ T = TypeVar("T")
 PRIORITY_FINAL = 0
 PRIORITY_PARTIAL = 10
 
+# Dispositivo en el que quedó cargado el modelo: el pedido, o "cpu" si CUDA
+# falló y se cayó a CPU. /health y /metrics.json publican este, no el pedido.
+EFFECTIVE_DEVICE: str | None = None
+
 
 @dataclass(frozen=True)
 class WordTiming:
@@ -92,19 +96,39 @@ def load_model(settings: Settings) -> WhisperModel:
     precisión del grande. Ese criterio era del camino que representaba por
     fragmentos; con la oración como unidad, un parcial malo se nota igual que
     un final malo y dos modelos solo agregan VRAM y una segunda caché.
+
+    El dispositivo **efectivo** queda en `EFFECTIVE_DEVICE`: si CUDA falla se
+    cae a CPU, y `/health` tiene que decir en qué está corriendo de verdad, no
+    lo que se le pidió. Publicar el pedido hizo que una corrida con la GPU
+    ocupada reportara `device=cuda` mientras transcribía en CPU (PR-REN-05 y
+    PR-STT-04, 2026-11-05).
     """
+    global EFFECTIVE_DEVICE
     print(f"Cargando modelo {settings.MODEL_SIZE} ({settings.DEVICE}, {settings.COMPUTE_TYPE})...", flush=True)
     try:
         model = WhisperModel(settings.MODEL_SIZE, device=settings.DEVICE, compute_type=settings.COMPUTE_TYPE)
+        EFFECTIVE_DEVICE = settings.DEVICE
         print(f"Modelo cargado en {settings.DEVICE}.", flush=True)
         return model
     except Exception as exc:
         if settings.DEVICE == "cuda":
             print(f"[ADVERTENCIA] GPU no disponible: {exc}\nCayendo a CPU...", flush=True)
             model = WhisperModel(settings.MODEL_SIZE, device="cpu", compute_type="int8")
+            EFFECTIVE_DEVICE = "cpu"
+            metrics.gauge("stt_device_fallback", 1)
             print("Modelo cargado en CPU.", flush=True)
             return model
         raise
+
+
+def effective_device(requested: str) -> str:
+    """Dispositivo en el que está corriendo el modelo.
+
+    Antes del arranque es el pedido; después, el que de verdad se usó. `/health`
+    publica este valor para que una evidencia no diga "cuda" cuando la máquina
+    está transcribiendo en CPU.
+    """
+    return EFFECTIVE_DEVICE or requested
 
 
 def warm_up(model: WhisperModel, settings: Settings) -> None:
