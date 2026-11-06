@@ -33,6 +33,7 @@ from faster_whisper import WhisperModel
 
 from app.config import Settings
 from app.metrics import ConcurrencyGauge, metrics, metrics_timer
+from app.non_speech import is_non_speech
 
 T = TypeVar("T")
 
@@ -297,6 +298,23 @@ def transcribe_buffer(
 
     elapsed_ms = (time.perf_counter() - started) * 1000
     result_text = " ".join(kept).strip()
+
+    if result_text and is_non_speech(result_text):
+        # Barrera de contenido: la tos y los carraspeos pasan el rms del buffer
+        # recortado por el VAD, y Whisper los escribe como onomatopeya. Ver
+        # app/non_speech.py para el porqué y la evidencia.
+        print(f"[non_speech] descartado: {result_text!r}", flush=True)
+        metrics.counter("stt_dropped_total",
+                        labels={"reason": "non_speech", "model": model_name or settings.MODEL_SIZE})
+        return TranscriptionResult(
+            "",
+            audio_ms=audio_ms,
+            elapsed_ms=elapsed_ms,
+            drop_reason="non_speech",
+            avg_logprob=worst_logprob,
+            no_speech_prob=worst_no_speech,
+            model=model_name,
+        )
 
     if not result_text:
         reason = "no_speech" if worst_no_speech >= settings.NO_SPEECH_THRESHOLD else "logprob"
