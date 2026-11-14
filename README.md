@@ -114,12 +114,27 @@ dependencias de `requirements-dev.txt` y deja `coverage.xml` en la raíz. No nec
 misma suite se puede correr en el host con `pytest -q` si se tienen esas dependencias
 instaladas.
 
+## El resto del sistema
+
+Este repositorio es **una pieza**. El sistema completo son
+[signall-android](https://github.com/sign-ai-organization/signall-android) (la app),
+[signall-backend](https://github.com/sign-ai-organization/signall-backend) (el WebSocket y las
+glosas), este servicio y
+[signall-docs](https://github.com/sign-ai-organization/signall-docs) (los documentos de la
+tesis), más [signall-avatar](https://github.com/sign-ai-organization/signall-avatar) para las
+animaciones.
+
+Los repositorios hermanos son **fuentes de información**: antes de cambiar un frame del
+WebSocket o una métrica hay que leer el otro lado, y el cambio no está terminado hasta que los
+dos lo reflejan. **Cada cambio no trivial se documenta en `signall-docs`**, en `cambios/`: una
+sesión que termina sin dejar rastro ahí no está terminada.
+
 ## Licencia
 
-Este proyecto se distribuye bajo la licencia {{LICENCIA}}. Ver [LICENSE](LICENSE).
+Este proyecto se distribuye bajo la licencia que defina la Pontificia Universidad Javeriana (pendiente de confirmación; por ahora, todos los derechos reservados). Ver [LICENSE](LICENSE).
 
 ## Trabajo de grado
 
 SignAll es un trabajo de grado de la Pontificia Universidad Javeriana (Colombia). Para
-citarlo: {{AUTOR}} ({{AÑO}}). *SignAll: español hablado a Lengua de Señas Colombiana con un
+citarlo: el equipo del trabajo de grado (2026). *SignAll: español hablado a Lengua de Señas Colombiana con un
 avatar 3D*.
