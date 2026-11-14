@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
     state.clear()
 
 
-app = FastAPI(title="SignAI STT Service", lifespan=lifespan)
+app = FastAPI(title="SignAll STT Service", lifespan=lifespan)
 
 
 @app.get("/health")

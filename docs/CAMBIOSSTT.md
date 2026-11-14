@@ -9,7 +9,7 @@ flujo **por oraciones**, y qué tiene que hacer el resto del sistema con esto.
 > trabajo de tiempo real, que vive en `origin/develop` (4 commits: el perfil de dos
 > modelos, `PARTIAL_INTERVAL_MS=250`, `SILENCE_TIMEOUT_MS=600`, …). Volver a `main`
 > y **dejar atrás** ese perfil es decisión del owner, escrita en
-> `Revisión de develop.md` (nota en la raíz de `sign-ai-android`, 2026-10-15):
+> `Revisión de develop.md` (nota en la raíz de `signall-android`, 2026-10-15):
 >
 > > **Base recomendada.** `origin/main` del backend ya contiene lo útil […] En STT,
 > > el commit `e1da961`.
@@ -111,7 +111,7 @@ ciego: con un TTS distinto, cada corrida sería un experimento distinto.
 ## 5. Cómo verificar
 
 ```bash
-docker compose -f ../sign-ai-backend/docker-compose.yml up -d
+docker compose -f ../signall-backend/docker-compose.yml up -d
 curl -s 127.0.0.1:8000/health
 # {"status":"ok","model":"medium","device":"cuda","language":"es","silence_timeout_ms":1500}
 ```
@@ -120,14 +120,14 @@ La lógica de `session.py` —la que decide cuándo se cierra una frase— se pr
 sin GPU, sin micrófono y sin los fixtures de audio:
 
 ```bash
-docker compose -f ../sign-ai-backend/docker-compose.yml run --rm --no-deps \
+docker compose -f ../signall-backend/docker-compose.yml run --rm --no-deps \
     -v "$PWD/scripts:/app/scripts" stt python -m scripts.verify_session
 ```
 
 Los parciales, los descartes y el atraso, en los logs del contenedor:
 
 ```bash
-docker compose -f ../sign-ai-backend/docker-compose.yml logs -f stt | grep -E '\[timing\]|\[rms\]|descartado'
+docker compose -f ../signall-backend/docker-compose.yml logs -f stt | grep -E '\[timing\]|\[rms\]|descartado'
 ```
 
 Desde el repo de Android, las tres mediciones que usan los 28 fixtures:

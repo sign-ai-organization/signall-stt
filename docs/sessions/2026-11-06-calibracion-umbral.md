@@ -2,7 +2,7 @@
 
 - **Fecha:** 2026-11-06
 - **Rama:** `fix/fases1-3`, desde `main` (`1208db8`)
-- **Origen:** Fase 1 de `../sign-ai-android/docs/plan-pruebas/Plan de implementación 2 - Plan Prueba SignAll.md`, ítem `STT-03`.
+- **Origen:** Fase 1 de `../signall-android/docs/plan-pruebas/Plan de implementación 2 - Plan Prueba SignAll.md`, ítem `STT-03`.
 
 ---
 
@@ -23,7 +23,7 @@ como referencia del WER. No se tocó código ni la configuración del servicio.
 ## Qué se midió
 
 Modelo `medium`, `float16`, GPU RTX 4050, audios WAV mono 16 kHz de
-`../sign-ai-android/docs/plan-pruebas/audios/16k/`, 2026-11-06.
+`../data/evidencias/plan-pruebas/audios/16k/`, 2026-11-06.
 
 | `AVG_LOGPROB_THRESHOLD` | WER AU-01 | errores/palabras | AU-01 con final vacío | AU-03 con texto |
 |---|---|---|---|---|

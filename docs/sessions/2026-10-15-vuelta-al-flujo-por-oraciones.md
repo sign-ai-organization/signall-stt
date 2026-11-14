@@ -3,7 +3,7 @@
 - **Fecha:** 2026-10-15
 - **Rama:** `flujo-oraciones`, desde `origin/main` (`7e724d8`, cuyo contenido es
   `e1da961`)
-- **Plan:** `sign-ai-docs/auditoria-flujo-2026-10-15.md` §6.2 y §6.2 bis
+- **Plan:** `signall-docs/auditoria-flujo-2026-10-15.md` §6.2 y §6.2 bis
 
 ---
 

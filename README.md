@@ -1,6 +1,6 @@
-# sign-ai-stt
+# signall-stt
 
-Servicio de Speech-to-Text (español) para el proyecto SignAI. Recibe audio del
+Servicio de Speech-to-Text (español) para el proyecto SignAll. Recibe audio del
 cliente (app móvil) y devuelve texto transcrito en tiempo real, usando
 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) + WebRTC VAD.
 
@@ -164,7 +164,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" stt \
     python -m scripts.verify_session
 ```
 
-`docker compose` se corre desde `../sign-ai-backend`, que es donde está el
+`docker compose` se corre desde `../signall-backend`, que es donde está el
 compose que levanta este servicio. Sale con código 1 si algo falla, así que sirve
 como guardia de regresión: antes de tocar `SILENCE_TIMEOUT_MS` o `MAX_BUFFER_MS`,
 correrlo.

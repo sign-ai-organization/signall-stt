@@ -219,7 +219,7 @@ vez; si se repite, se ajusta con `SPEECH_ONSET_WINDOW_MS`.
 ## 8. Vuelta al flujo por oraciones: qué de la latencia se queda y qué no
 
 **Fecha:** 2026-10-15
-**Plan:** `sign-ai-docs/auditoria-flujo-2026-10-15.md` §6.2
+**Plan:** `signall-docs/auditoria-flujo-2026-10-15.md` §6.2
 
 Entre el 13 y el 14 de octubre este servicio corrió con un perfil de tiempo
 real: cinco defaults cambiados (silencio 600 ms, parciales cada 250 ms, ventana
