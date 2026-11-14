@@ -6,7 +6,7 @@ name: CI
 #
 # El análisis de SonarQube no corre acá: el servidor es local. Se corre a mano:
 #
-#   reestructuracion/herramientas/escanear/sonar.sh signall-stt
+#   ../signall-android/tools/calidad/sonar.sh signall-stt
 
 on:
   push:
