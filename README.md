@@ -75,7 +75,7 @@ imagen del servicio ya trae `numpy`, `webrtcvad` y `faster-whisper`, y las herra
 de `requirements-dev.txt` se instalan ahí— y deja `coverage.xml` en la raíz. SonarQube lo
 lee con `sonar.python.coverage.reportPaths`. No necesita GPU.
 
-Medido el 2026-11-14 con ese script: **73 %** de `app/` (670 líneas, 138 ramas). Los
+Medido el 2026-11-14 con ese script: **90 %** de `app/` (670 líneas, 138 ramas). Los
 scripts de verificación y las utilidades de escritorio quedan fuera del cálculo
 (`sonar.coverage.exclusions`): son el instrumento, no el código que se mide.
 
