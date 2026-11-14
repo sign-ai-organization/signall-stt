@@ -45,7 +45,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import Settings  # noqa: E402
 from app.session import StreamingSession  # noqa: E402
-from app.transcriber import PRIORITY_FINAL, PRIORITY_PARTIAL, TranscriptionResult  # noqa: E402
+from app.transcriber import (  # noqa: E402
+    PRIORITY_FINAL,
+    PRIORITY_PARTIAL,
+    TranscriptionResult,
+    transcribe_buffer,
+)
 
 
 # ── Dobles de prueba ───────────────────────────────────────────────────────────
@@ -63,6 +68,10 @@ class FakeVad:
 
     def is_speech(self, frame: bytes, sample_rate: int) -> bool:
         samples = np.frombuffer(frame, dtype=np.int16)
+        # WebRTC VAD solo acepta frames de 10, 20 o 30 ms; el doble rechaza un
+        # frame mal armado por la misma razón que el real fallaría.
+        if len(samples) * 1000 / sample_rate not in (10, 20, 30):
+            return False
         rms = float(np.sqrt(np.mean((samples.astype(np.float32) / 32768.0) ** 2)))
         return rms >= self.umbral
 
@@ -83,6 +92,9 @@ class FakeScheduler:
     async def run(self, priority: int, func, *args) -> TranscriptionResult:
         # La sesión llama `run(prioridad, transcribe_buffer, modelo, audio,
         # settings, model_size)`: el audio es el segundo argumento posicional.
+        # `func` no se ejecuta —no hay modelo— pero se comprueba que la sesión
+        # despache la función real y no otra cosa.
+        assert func is transcribe_buffer, f"la sesión despachó {func!r}"
         audio = args[1]
         audio_ms = len(audio) / self._sample_rate * 1000
         self.prioridades.append(priority)

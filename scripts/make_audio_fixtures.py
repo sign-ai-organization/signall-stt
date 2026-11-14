@@ -45,6 +45,7 @@ import numpy as np
 PIPER_VOICE_DIR = Path.home() / ".cache" / "signai-piper" / "es_ES-sharvard-medium"
 VOICE_URL_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/sharvard/medium"
 VOICE_FILES = ("es_ES-sharvard-medium.onnx", "es_ES-sharvard-medium.onnx.json")
+VOICE_MODEL_PATH = PIPER_VOICE_DIR / VOICE_FILES[0]
 TARGET_RATE = 16000
 
 # Frases del caso de uso real ("Registro Basico de Datos"), ordenadas de la mas
@@ -97,14 +98,15 @@ class WordTiming:
     end_ms: int
 
 
-def ensure_voice() -> Path:
-    """Descarga la voz piper si no esta. Es idempotente."""
-    PIPER_VOICE_DIR.mkdir(parents=True, exist_ok=True)
-    model = PIPER_VOICE_DIR / VOICE_FILES[0]
-    config = PIPER_VOICE_DIR / VOICE_FILES[1]
+def ensure_voice() -> None:
+    """Descarga la voz piper si no esta. Es idempotente.
 
-    if model.exists() and config.exists():
-        return model
+    El modelo queda en `VOICE_MODEL_PATH`; no devuelve la ruta porque es
+    siempre la misma y publicarla como retorno sugeriria que puede variar.
+    """
+    PIPER_VOICE_DIR.mkdir(parents=True, exist_ok=True)
+    if all((PIPER_VOICE_DIR / filename).exists() for filename in VOICE_FILES):
+        return
 
     import urllib.request
 
@@ -114,7 +116,6 @@ def ensure_voice() -> Path:
             continue
         print(f"descargando {filename} ...", file=sys.stderr)
         urllib.request.urlretrieve(f"{VOICE_URL_BASE}/{filename}", target)
-    return model
 
 
 def resample(audio: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
@@ -257,7 +258,8 @@ def main() -> int:
         )
         return 1
 
-    model_path = ensure_voice()
+    ensure_voice()
+    model_path = VOICE_MODEL_PATH
     print(f"cargando voz {model_path} ...", file=sys.stderr)
     voice = PiperVoice.load(str(model_path), config_path=str(model_path) + ".json")
 

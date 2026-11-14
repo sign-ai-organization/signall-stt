@@ -215,18 +215,34 @@ class InferenceScheduler:
             if future.cancelled():
                 self._queue.task_done()
                 continue
-            try:
-                with ConcurrencyGauge("stt_inference_active", "Inferencias simultaneas en vuelo"):
-                    result = await asyncio.to_thread(func, *args)
-            except BaseException as exc:  # noqa: BLE001 - se re-lanza al solicitante
-                if not future.done():
-                    future.set_exception(exc)
-            else:
-                if not future.done():
-                    future.set_result(result)
-            finally:
-                metrics.gauge("stt_inference_queue", self._queue.qsize())
-                self._queue.task_done()
+            await self._run_job(func, args, future)
+
+    async def _run_job(self, func: Callable[..., T], args: tuple[Any, ...], future: asyncio.Future) -> None:
+        """Corre un pedido y le entrega el resultado o el error al solicitante."""
+        try:
+            with ConcurrencyGauge("stt_inference_active", "Inferencias simultaneas en vuelo"):
+                result = await asyncio.to_thread(func, *args)
+        except asyncio.CancelledError as exc:
+            # Es la parada del servicio (`stop()`), no un fallo de la
+            # inferencia: se le avisa al solicitante y se re-lanza para que
+            # el worker termine.
+            if not future.done():
+                future.set_exception(exc)
+            raise
+        except Exception as exc:
+            # `Exception` y no `BaseException`: un `SystemExit` o un
+            # `KeyboardInterrupt` son de quien maneja el proceso y tienen
+            # que propagarse, no viajar al solicitante como si fueran un
+            # error de transcripción.
+            if not future.done():
+                future.set_exception(exc)
+        else:
+            if not future.done():
+                future.set_result(result)
+        finally:
+            assert self._queue is not None
+            metrics.gauge("stt_inference_queue", self._queue.qsize())
+            self._queue.task_done()
 
 
 def _loud_frames_rms(audio_buffer: np.ndarray, settings: Settings) -> float:
@@ -238,6 +254,40 @@ def _loud_frames_rms(audio_buffer: np.ndarray, settings: Settings) -> float:
     frames = audio_buffer[: frame_count * frame_size].reshape(frame_count, frame_size)
     frame_rms = np.sqrt(np.mean(frames ** 2, axis=1))
     return float(np.percentile(frame_rms, settings.MIN_RMS_PERCENTILE))
+
+
+def _collect_segments(segments: Any, settings: Settings) -> tuple[list[str], list[WordTiming], float, float]:
+    """Recorre los segmentos del modelo y junta lo que pasa los filtros.
+
+    Devuelve el texto conservado, las palabras (si `WORD_TIMESTAMPS` esta
+    prendido) y las dos peores probabilidades vistas, que son el diagnostico
+    del descarte. `transcribe()` devuelve un generador perezoso: la
+    decodificacion realmente ocurre en este recorrido, no en la llamada.
+
+    Un segmento que no pasa un filtro se salta, pero sus probabilidades igual
+    cuentan: es lo que permite decir despues si el buffer entero se cayo por
+    `no_speech` o por `logprob`.
+    """
+    kept: list[str] = []
+    words: list[WordTiming] = []
+    worst_logprob = 0.0
+    worst_no_speech = 0.0
+
+    for seg in segments:
+        worst_logprob = min(worst_logprob, seg.avg_logprob)
+        worst_no_speech = max(worst_no_speech, seg.no_speech_prob)
+        if seg.no_speech_prob >= settings.NO_SPEECH_THRESHOLD:
+            continue
+        if seg.avg_logprob < settings.AVG_LOGPROB_THRESHOLD:
+            continue
+
+        text = seg.text.strip()
+        if text:
+            kept.append(text)
+        if settings.WORD_TIMESTAMPS:
+            words.extend(_word_timings(seg))
+
+    return kept, words, worst_logprob, worst_no_speech
 
 
 def transcribe_buffer(
@@ -275,26 +325,7 @@ def transcribe_buffer(
             initial_prompt=settings.INITIAL_PROMPT,
             word_timestamps=settings.WORD_TIMESTAMPS,
         )
-        kept: list[str] = []
-        words: list[WordTiming] = []
-        worst_logprob = 0.0
-        worst_no_speech = 0.0
-
-        # transcribe() devuelve un generador perezoso: la decodificacion
-        # realmente ocurre aca adentro, no en la llamada.
-        for seg in segments:
-            worst_logprob = min(worst_logprob, seg.avg_logprob)
-            worst_no_speech = max(worst_no_speech, seg.no_speech_prob)
-            if seg.no_speech_prob >= settings.NO_SPEECH_THRESHOLD:
-                continue
-            if seg.avg_logprob < settings.AVG_LOGPROB_THRESHOLD:
-                continue
-
-            text = seg.text.strip()
-            if text:
-                kept.append(text)
-            if settings.WORD_TIMESTAMPS:
-                words.extend(_word_timings(seg))
+        kept, words, worst_logprob, worst_no_speech = _collect_segments(segments, settings)
 
     elapsed_ms = (time.perf_counter() - started) * 1000
     result_text = " ".join(kept).strip()
