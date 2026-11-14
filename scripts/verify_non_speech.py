@@ -72,15 +72,23 @@ def check(texto: str, esperado: bool) -> None:
         failures.append(texto)
 
 
-print("debe descartarse")
-for texto in DEBE_DESCARTARSE:
-    check(texto, True)
+def main() -> int:
+    """Corre las dos listas y devuelve 0 si todo pasó, 1 si algo falló."""
+    del failures[:]
+    print("debe descartarse")
+    for texto in DEBE_DESCARTARSE:
+        check(texto, True)
 
-print("\nno debe descartarse")
-for texto in NO_DEBE_DESCARTARSE:
-    check(texto, False)
+    print("\nno debe descartarse")
+    for texto in NO_DEBE_DESCARTARSE:
+        check(texto, False)
 
-if failures:
-    print(f"\n{len(failures)} comprobación(es) fallaron")
-    sys.exit(1)
-print("\nTodas las comprobaciones pasaron")
+    if failures:
+        print(f"\n{len(failures)} comprobación(es) fallaron")
+        return 1
+    print("\nTodas las comprobaciones pasaron")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

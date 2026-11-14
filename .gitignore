@@ -6,3 +6,9 @@ venv/
 # Los WAV se regeneran con `scripts/make_audio_fixtures.py`; versionar audio
 # binario infla el repo sin agregar informacion.
 *.wav
+# Cobertura: `scripts/cobertura.sh` genera los datos crudos y `coverage.xml`,
+# que es un artefacto (Sonar lo lee del disco, no hace falta versionarlo).
+.coverage
+.coverage.*
+coverage.xml
+.pytest_cache/

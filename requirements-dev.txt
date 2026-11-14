@@ -1,3 +1,12 @@
+# Dependencias que NO van en la imagen del servicio: son de escritorio
+# (`sounddevice`, `websockets` para `scripts/mic_test_client.py`) y de las
+# verificaciones que corren sin GPU (`pytest`, `coverage`).
+#
+# `scripts/cobertura.sh` instala este archivo dentro del contenedor descartable
+# antes de medir, así que agregar una herramienta acá no cambia la imagen.
 websockets==13.*
 sounddevice==0.5.*
 numpy==2.4.*
+pytest==9.*
+pytest-cov==7.*
+coverage==7.*

@@ -54,7 +54,30 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" stt \
 ```
 
 Sale con código 1 si algo falla. Antes de tocar `SILENCE_TIMEOUT_MS` o `MAX_BUFFER_MS`,
-correrla.
+correrla. La barrera de contenido (`app/non_speech.py`) tiene la suya:
+
+```bash
+docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" stt \
+    python -m scripts.verify_non_speech
+```
+
+Las dos están envueltas en `tests/`, así que `pytest -q` corre lo mismo cuando hay un
+entorno con las dependencias del servicio.
+
+### Cobertura
+
+```bash
+./scripts/cobertura.sh
+```
+
+Corre los dos scripts y la suite de `tests/` dentro de un contenedor descartable —la
+imagen del servicio ya trae `numpy`, `webrtcvad` y `faster-whisper`, y las herramientas
+de `requirements-dev.txt` se instalan ahí— y deja `coverage.xml` en la raíz. SonarQube lo
+lee con `sonar.python.coverage.reportPaths`. No necesita GPU.
+
+Medido el 2026-11-14 con ese script: **73 %** de `app/` (670 líneas, 138 ramas). Los
+scripts de verificación y las utilidades de escritorio quedan fuera del cálculo
+(`sonar.coverage.exclusions`): son el instrumento, no el código que se mide.
 
 ## Qué necesita
 

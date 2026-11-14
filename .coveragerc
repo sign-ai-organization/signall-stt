@@ -1,0 +1,18 @@
+# Configuración de coverage.py para el servicio.
+#
+# Lo que se mide es `app/`, no `scripts/`: los scripts de verificación son el
+# instrumento que ejercita el código, no el código que se quiere medir. Sin
+# `source`, coverage contaría además las librerías de terceros que importan los
+# scripts.
+[run]
+source = app
+branch = True
+# Rutas relativas a la raíz del repo: `coverage.xml` lo lee SonarQube, que
+# corre en otro contenedor con el repo montado en otra ruta absoluta. Con rutas
+# absolutas el reporte no engancha ningún archivo y la cobertura sale 0 %.
+relative_files = True
+
+[report]
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
