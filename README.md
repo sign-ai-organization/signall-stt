@@ -35,22 +35,36 @@ que lo construye y lo conecta por la red interna. Para correrlo solo:
 ```bash
 git clone https://github.com/sign-ai-organization/signall-stt
 cd signall-stt
+cp .env.example .env      # perfil de CPU, el caso base
 docker compose up --build
 ```
 
 Queda en `http://localhost:8000`. El primer arranque descarga el modelo de Whisper desde
 Hugging Face y lo deja en el volumen `hf-cache`, así que los siguientes son rápidos.
 
-Por defecto usa GPU (`DEVICE=cuda`, `COMPUTE_TYPE=float16`) y necesita NVIDIA Container
-Toolkit. Sin GPU:
+### CPU o GPU: se elige, no se detecta
 
-```bash
-DEVICE=cpu COMPUTE_TYPE=int8 docker compose up --build
-```
+La **CPU es el caso base** y la **GPU es opcional**. El modelo y el dispositivo se eligen con
+tres variables de entorno —`MODEL_SIZE`, `DEVICE` y `COMPUTE_TYPE`— y el perfil de GPU es un
+archivo de Compose aparte: `docker-compose.gpu.yml`. Ese archivo fija `cuda`/`float16`/`medium`
+y reserva la tarjeta NVIDIA. La elección es **manual y explícita**: no hay preguntas, no hay
+autodetección y no hay un segundo Dockerfile.
 
-En ese caso también hay que quitar el bloque `deploy.resources` del `docker-compose.yml`,
-porque Docker intenta reservar un dispositivo que no existe. Si la GPU está declarada pero
-falla al cargar el modelo, el servicio cae a CPU solo.
+| Quiero… | Comando |
+|---|---|
+| **sin GPU** (caso base) | `docker compose up --build` |
+| **con GPU** (opt-in) | `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build` |
+| sin GPU, con otro modelo | `MODEL_SIZE=base docker compose up --build` |
+
+| Archivo | `MODEL_SIZE` | `DEVICE` | `COMPUTE_TYPE` | Reserva NVIDIA |
+|---|---|---|---|---|
+| `docker-compose.yml` (base) | `${MODEL_SIZE:-small}` | `${DEVICE:-cpu}` | `${COMPUTE_TYPE:-int8}` | no |
+| `docker-compose.gpu.yml` (override) | `medium` | `cuda` | `float16` | sí, driver `nvidia` |
+
+El perfil de GPU necesita NVIDIA Container Toolkit (o Docker Desktop con soporte GPU
+habilitado). Si se pide CUDA y la GPU falla al cargar el modelo, el servicio cae a CPU como
+red de seguridad en tiempo de ejecución y `/health` publica el dispositivo efectivo; eso no
+elige el perfil, que ya quedó declarado en el comando.
 
 El consumidor es el backend, que lo llama en `ws://stt:8000/ws/transcribe` dentro de la red de
 compose o en `ws://localhost:8000/ws/transcribe` desde la máquina anfitriona
@@ -61,8 +75,8 @@ compose o en `ws://localhost:8000/ws/transcribe` desde la máquina anfitriona
 | Necesitas | Detalle |
 |---|---|
 | Docker + Compose | el servicio no se instala en el host |
-| GPU NVIDIA | opcional; con `DEVICE=cpu` y `COMPUTE_TYPE=int8` funciona |
-| NVIDIA Container Toolkit | solo si se usa GPU |
+| GPU NVIDIA | opcional; el caso base corre en CPU con `DEVICE=cpu` y `COMPUTE_TYPE=int8` |
+| NVIDIA Container Toolkit | solo si se usa el override `docker-compose.gpu.yml` |
 | Modelo de Whisper | se descarga en el primer arranque y queda en el volumen `hf-cache` |
 | Puerto | `8000` |
 | Fixtures de audio | opcionales: los `.wav` no están en git y se regeneran con `scripts/make_audio_fixtures.py` |

@@ -74,8 +74,8 @@ Para cambiar un frame o un nombre de métrica, primero se lee el otro lado:
 
 ```bash
 # el servicio, solo
-docker compose up --build
-DEVICE=cpu COMPUTE_TYPE=int8 docker compose up --build   # sin GPU; quitar deploy.resources
+docker compose up --build                                              # CPU (caso base)
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build   # GPU (opt-in)
 
 # verificación de la segmentación y del filtro de voz (sin GPU)
 docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" stt \
@@ -97,6 +97,23 @@ El sistema completo —con el proxy TLS, que es parte del sistema— se levanta 
 docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
 ```
 
+## CPU y GPU: declarado, no detectado
+
+La **CPU es el caso base** y la **GPU es opt-in**. El modelo y el dispositivo se eligen con
+`MODEL_SIZE`, `DEVICE` y `COMPUTE_TYPE`; `docker-compose.gpu.yml` fija el perfil de GPU
+(`cuda`/`float16`/`medium`) y agrega `deploy.resources.reservations.devices` con driver
+`nvidia`. No hay preguntas ni autodetección: el perfil se declara en el comando.
+
+| Quiero… | Comando |
+|---|---|
+| **sin GPU** (caso base) | `docker compose up --build` |
+| **con GPU** (opt-in) | `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build` |
+
+No existen `docker-compose.cpu.yml` ni `Dockerfile.cpu`: el caso base ya es CPU y el único
+modo de pedir GPU es agregar el override. `/health` publica `device` (el efectivo) y
+`requested_device`; si CUDA falla al cargar, `load_model` cae a CPU como red de seguridad,
+pero eso no cambia el perfil que se declaró.
+
 ## Trampas que cuestan tiempo
 
 - **Los `.wav` de `fixtures/` no están en git.** Se regeneran con
@@ -113,8 +130,9 @@ docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
   (medido con "cómo estás" y "estoy triste").
 - **`MAX_CONCURRENT_INFERENCE` es 1 a propósito.** Whisper serializa igual por debajo; con más
   de uno solo hay thrash.
-- **La GPU es opcional y la CPU es lenta.** Si la GPU está declarada pero falla al cargar el
-  modelo, el servicio cae a CPU solo.
+- **La GPU es opcional y la CPU es lenta.** El caso base es CPU; para GPU se agrega
+  `docker-compose.gpu.yml`. Si se pide CUDA y falla al cargar el modelo, el servicio cae a CPU
+  solo como red de seguridad, y `/health` publica el dispositivo efectivo.
 - **Partes de `app/main.py` y `app/metrics.py` no se pueden cubrir sin GPU o servicios
   externos**: la cobertura de esas líneas es deuda conocida, no un olvido.
 

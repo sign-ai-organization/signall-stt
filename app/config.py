@@ -32,9 +32,13 @@ class Settings:
     SAMPLE_RATE: int = _env_int("SAMPLE_RATE", 16000)
     FRAME_DURATION_MS: int = _env_int("FRAME_DURATION_MS", 30)  # WebRTC VAD solo acepta 10, 20 o 30
 
-    MODEL_SIZE: str = os.getenv("MODEL_SIZE", "medium")
-    DEVICE: str = os.getenv("DEVICE", "cuda")
-    COMPUTE_TYPE: str = os.getenv("COMPUTE_TYPE", "float16")
+    # CPU is the base case and GPU is opt-in: `docker-compose.gpu.yml` fixes
+    # the GPU profile (cuda/float16/medium). Nothing detects the hardware to
+    # choose it; if CUDA is requested and fails to load, `load_model` falls
+    # back to CPU as a safety net and `/health` publishes the effective device.
+    MODEL_SIZE: str = os.getenv("MODEL_SIZE", "small")
+    DEVICE: str = os.getenv("DEVICE", "cpu")
+    COMPUTE_TYPE: str = os.getenv("COMPUTE_TYPE", "int8")
     LANGUAGE: str = os.getenv("LANGUAGE", "es")
 
     VAD_AGGRESSIVENESS: int = _env_int("VAD_AGGRESSIVENESS", 2)

@@ -3,10 +3,14 @@ services:
     build: .
     ports:
       - "8000:8000"
+    # La CPU es el caso base y la GPU es opt-in con `docker-compose.gpu.yml`,
+    # que fija cuda/float16/medium y reserva el dispositivo NVIDIA. Los tres
+    # valores vienen del entorno y nada detecta el hardware: la elección se
+    # declara, no se adivina.
     environment:
-      MODEL_SIZE: ${MODEL_SIZE:-medium}
-      DEVICE: ${DEVICE:-cuda}
-      COMPUTE_TYPE: ${COMPUTE_TYPE:-float16}
+      MODEL_SIZE: ${MODEL_SIZE:-small}
+      DEVICE: ${DEVICE:-cpu}
+      COMPUTE_TYPE: ${COMPUTE_TYPE:-int8}
       LANGUAGE: ${LANGUAGE:-es}
       NO_SPEECH_THRESHOLD: ${NO_SPEECH_THRESHOLD:-0.6}
       # Default de Whisper. No subir a -0.8: descarta audio que el modelo
@@ -36,16 +40,6 @@ services:
       # lectura para que las pruebas se puedan reproducir sin rebuild de la
       # imagen. Los `.wav` no están en git (ver `.gitignore`).
       - ./fixtures:/fixtures:ro
-    # Requiere NVIDIA Container Toolkit (o Docker Desktop con soporte GPU habilitado).
-    # Si no tenés GPU, borrá este bloque y poné DEVICE=cpu / COMPUTE_TYPE=int8 arriba;
-    # igual hay fallback automático a CPU si la GPU falla al cargar el modelo.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
 volumes:
   hf-cache:

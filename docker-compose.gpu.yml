@@ -1,0 +1,26 @@
+# Opt-in de GPU. No forma parte del stack base: el caso base es CPU.
+#
+# Se agrega después del archivo base:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Fija el modelo en el perfil de GPU (cuda / float16 / medium) y reserva un
+# dispositivo NVIDIA, que necesita NVIDIA Container Toolkit (o Docker Desktop
+# con soporte GPU habilitado). Los valores se fijan en vez de leerse del
+# entorno a propósito: pedir la GPU es explícito y manual, y nada acá detecta
+# el hardware.
+#
+# Sin GPU, no usar este archivo: el archivo base es el perfil de CPU.
+services:
+  stt:
+    environment:
+      MODEL_SIZE: medium
+      DEVICE: cuda
+      COMPUTE_TYPE: float16
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
