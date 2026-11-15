@@ -7,9 +7,9 @@ locales y estructura. El [`README.md`](../README.md) es la puerta de entrada.
 
 | Variable | Default | Descripción |
 |---|---|---|
-| `MODEL_SIZE` | `medium` | `tiny`, `base`, `small`, `medium`, `large-v3`. Se usa para **todo**: finales y parciales |
-| `DEVICE` | `cuda` | `cuda` o `cpu` |
-| `COMPUTE_TYPE` | `float16` | `float16` (GPU) o `int8` (CPU) |
+| `MODEL_SIZE` | `small` | `tiny`, `base`, `small`, `medium`, `large-v3`. Se usa para **todo**: finales y parciales |
+| `DEVICE` | `cpu` | `cpu` (caso base) o `cuda` (opt-in con `docker-compose.gpu.yml`) |
+| `COMPUTE_TYPE` | `int8` | `int8` (CPU) o `float16` (GPU) |
 | `LANGUAGE` | `es` | Idioma para Whisper |
 | `VAD_AGGRESSIVENESS` | `2` | 0 (permisivo) a 3 (estricto) |
 | `SILENCE_TIMEOUT_MS` | `1500` | Silencio para cerrar un segmento. Es el mayor término de la latencia: bajarlo parte las frases en las pausas |
@@ -30,6 +30,11 @@ también explícitos en `docker-compose.yml` a propósito.
 Ver `app/config.py` para la lista completa. Se copia `.env.example` a `.env` para
 ajustarlas (`docker compose` lo lee solo).
 
+El modelo y el dispositivo se eligen con `MODEL_SIZE`, `DEVICE` y `COMPUTE_TYPE`. La CPU es
+el caso base; la GPU es opt-in agregando `docker-compose.gpu.yml`, que fija
+`cuda`/`float16`/`medium` y reserva el dispositivo NVIDIA. No hay autodetección: la elección
+es manual y declarada en el comando o en el `.env`.
+
 ## API
 
 Este servicio **solo transcribe**. No divide en oraciones, no traduce y no decide qué se
@@ -40,7 +45,7 @@ cuando el cliente se la envía como `text`. El contrato completo está en
 ### `GET /health`
 
 ```json
-{"status": "ok", "model": "medium", "device": "cuda", "language": "es", "silence_timeout_ms": 1500}
+{"status": "ok", "model": "small", "device": "cpu", "language": "es", "silence_timeout_ms": 1500}
 ```
 
 ### `GET /metrics` y `GET /metrics.json`
