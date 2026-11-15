@@ -1,0 +1,10 @@
+# Perfil de GPU, que es el DEFAULT del servicio (el entorno del plan de pruebas:
+# Whisper `medium` con una GPU NVIDIA). Son las librerías que ctranslate2 carga
+# en tiempo de ejecución solo cuando `DEVICE=cuda`; en el perfil de CPU no hacen
+# falta y pesan 2,27 GB en la imagen, así que viven acá y no en
+# `requirements.txt`.
+#
+# El perfil de CPU (`docker-compose.cpu.yml`) instala `requirements.txt` a secas.
+-r requirements.txt
+nvidia-cublas-cu12==12.9.*
+nvidia-cudnn-cu12==9.25.*

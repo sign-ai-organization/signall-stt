@@ -1,0 +1,30 @@
+# Perfil de CPU: la opción cómoda para una PC sin GPU o con una GPU que no
+# alcanza para el perfil del plan de pruebas. **No es el default**: el default
+# es `medium` en GPU (ver `docker-compose.yml`).
+#
+# Se agrega después del archivo base:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d --build
+#
+# Hace tres cosas:
+#   1. Fija `small`/`cpu`/`int8`. Los valores se fijan en vez de leerse del
+#      entorno a propósito: pedir CPU es explícito y nada acá detecta el
+#      hardware.
+#   2. Quita la reserva del dispositivo NVIDIA (`!reset`), porque Docker
+#      intentaría reservar una tarjeta que no existe.
+#   3. Compila la imagen con `requirements.txt` a secas, así no baja 2,27 GB de
+#      librerías de CUDA que no puede usar.
+#
+# `small` es el default del perfil porque `medium` en CPU es varias veces más
+# lento que en tiempo real. Para elegir otro tamaño, se agrega un override
+# mínimo con `environment: { MODEL_SIZE: … }` o se edita esta línea.
+services:
+  stt:
+    build:
+      args:
+        REQUIREMENTS_FILE: requirements.txt
+    environment:
+      MODEL_SIZE: small
+      DEVICE: cpu
+      COMPUTE_TYPE: int8
+    deploy: !reset {}

@@ -35,7 +35,7 @@ que lo construye y lo conecta por la red interna. Para correrlo solo:
 ```bash
 git clone https://github.com/sign-ai-organization/signall-stt
 cd signall-stt
-cp .env.example .env      # perfil de CPU, el caso base
+cp .env.example .env      # perfil del plan de pruebas: medium en GPU
 docker compose up --build
 ```
 
@@ -44,22 +44,23 @@ Hugging Face y lo deja en el volumen `hf-cache`, así que los siguientes son rá
 
 ### CPU o GPU: se elige, no se detecta
 
-La **CPU es el caso base** y la **GPU es opcional**. El modelo y el dispositivo se eligen con
-tres variables de entorno —`MODEL_SIZE`, `DEVICE` y `COMPUTE_TYPE`— y el perfil de GPU es un
-archivo de Compose aparte: `docker-compose.gpu.yml`. Ese archivo fija `cuda`/`float16`/`medium`
-y reserva la tarjeta NVIDIA. La elección es **manual y explícita**: no hay preguntas, no hay
-autodetección y no hay un segundo Dockerfile.
+El **default es el entorno del plan de pruebas**: Whisper `medium` en una GPU NVIDIA. El
+modelo y el dispositivo se eligen con tres variables de entorno —`MODEL_SIZE`, `DEVICE` y
+`COMPUTE_TYPE`—. Para una PC **sin GPU** (o con una que no alcanza) está el perfil de CPU en
+`docker-compose.cpu.yml`: fija `small`/`cpu`/`int8`, quita la reserva del dispositivo NVIDIA y
+compila la imagen sin las librerías de CUDA. La elección es **manual y explícita**: no hay
+preguntas, no hay autodetección y no hay un segundo Dockerfile.
 
 | Quiero… | Comando |
 |---|---|
-| **sin GPU** (caso base) | `docker compose up --build` |
-| **con GPU** (opt-in) | `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build` |
-| sin GPU, con otro modelo | `MODEL_SIZE=base docker compose up --build` |
+| **el default** (GPU, `medium`) | `docker compose up --build` |
+| **sin GPU** | `docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build` |
+| con GPU, otro modelo | `MODEL_SIZE=large-v3 docker compose up --build` |
 
-| Archivo | `MODEL_SIZE` | `DEVICE` | `COMPUTE_TYPE` | Reserva NVIDIA |
-|---|---|---|---|---|
-| `docker-compose.yml` (base) | `${MODEL_SIZE:-small}` | `${DEVICE:-cpu}` | `${COMPUTE_TYPE:-int8}` | no |
-| `docker-compose.gpu.yml` (override) | `medium` | `cuda` | `float16` | sí, driver `nvidia` |
+| Archivo | `MODEL_SIZE` | `DEVICE` | `COMPUTE_TYPE` | Reserva NVIDIA | Librerías CUDA |
+|---|---|---|---|---|---|
+| `docker-compose.yml` (base, default) | `${MODEL_SIZE:-medium}` | `${DEVICE:-cuda}` | `${COMPUTE_TYPE:-float16}` | sí, driver `nvidia` | `requirements-gpu.txt` |
+| `docker-compose.cpu.yml` (override) | `small` | `cpu` | `int8` | no (`!reset`) | `requirements.txt` |
 
 El perfil de GPU necesita NVIDIA Container Toolkit (o Docker Desktop con soporte GPU
 habilitado). Si se pide CUDA y la GPU falla al cargar el modelo, el servicio cae a CPU como
@@ -75,8 +76,8 @@ compose o en `ws://localhost:8000/ws/transcribe` desde la máquina anfitriona
 | Necesitas | Detalle |
 |---|---|
 | Docker + Compose | el servicio no se instala en el host |
-| GPU NVIDIA | opcional; el caso base corre en CPU con `DEVICE=cpu` y `COMPUTE_TYPE=int8` |
-| NVIDIA Container Toolkit | solo si se usa el override `docker-compose.gpu.yml` |
+| GPU NVIDIA | la del plan de pruebas (≥ 4 GB VRAM); sin GPU se usa el override `docker-compose.cpu.yml` |
+| NVIDIA Container Toolkit | el default (GPU); no hace falta con `docker-compose.cpu.yml` |
 | Modelo de Whisper | se descarga en el primer arranque y queda en el volumen `hf-cache` |
 | Puerto | `8000` |
 | Fixtures de audio | opcionales: los `.wav` no están en git y se regeneran con `scripts/make_audio_fixtures.py` |

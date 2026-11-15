@@ -1,8 +1,10 @@
+# Dependencias del servicio, sin CUDA: esto es lo que se instala en el perfil de
+# CPU (`docker-compose.cpu.yml`). El perfil de GPU, que es el DEFAULT, suma
+# `requirements-gpu.txt`, que incluye este archivo y agrega las librerías de
+# NVIDIA.
 fastapi==0.115.*
 uvicorn[standard]==0.32.*
 python-multipart==0.0.*
 faster-whisper==1.2.*
 numpy==2.4.*
 webrtcvad-wheels==2.0.*
-nvidia-cublas-cu12==12.9.*
-nvidia-cudnn-cu12==9.25.*

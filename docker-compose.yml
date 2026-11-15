@@ -3,14 +3,18 @@ services:
     build: .
     ports:
       - "8000:8000"
-    # La CPU es el caso base y la GPU es opt-in con `docker-compose.gpu.yml`,
-    # que fija cuda/float16/medium y reserva el dispositivo NVIDIA. Los tres
-    # valores vienen del entorno y nada detecta el hardware: la elección se
-    # declara, no se adivina.
+    # El DEFAULT es el entorno del plan de pruebas: Whisper `medium` en una GPU
+    # NVIDIA (`float16`). Los tres valores se pueden ajustar desde el `.env` y
+    # nada detecta el hardware.
+    #
+    # Para una PC sin GPU (o con una GPU que no alcanza) está el perfil de CPU:
+    #     docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+    # Ese override fija `small`/`cpu`/`int8`, quita la reserva del dispositivo y
+    # compila la imagen sin las librerías de CUDA (`requirements.txt`).
     environment:
-      MODEL_SIZE: ${MODEL_SIZE:-small}
-      DEVICE: ${DEVICE:-cpu}
-      COMPUTE_TYPE: ${COMPUTE_TYPE:-int8}
+      MODEL_SIZE: ${MODEL_SIZE:-medium}
+      DEVICE: ${DEVICE:-cuda}
+      COMPUTE_TYPE: ${COMPUTE_TYPE:-float16}
       LANGUAGE: ${LANGUAGE:-es}
       NO_SPEECH_THRESHOLD: ${NO_SPEECH_THRESHOLD:-0.6}
       # Default de Whisper. No subir a -0.8: descarta audio que el modelo
@@ -40,6 +44,16 @@ services:
       # lectura para que las pruebas se puedan reproducir sin rebuild de la
       # imagen. Los `.wav` no están en git (ver `.gitignore`).
       - ./fixtures:/fixtures:ro
+    # Requiere NVIDIA Container Toolkit (o Docker Desktop con soporte GPU
+    # habilitado). Es el default porque es el entorno del plan de pruebas; el
+    # perfil de CPU lo quita con `docker-compose.cpu.yml`.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
 volumes:
   hf-cache:

@@ -74,10 +74,10 @@ Para cambiar un frame o un nombre de métrica, primero se lee el otro lado:
 
 ```bash
 # el servicio, solo
-docker compose up --build                                              # CPU (caso base)
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build   # GPU (opt-in)
+docker compose up --build                                                # default: GPU, medium
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build # sin GPU
 
-# verificación de la segmentación y del filtro de voz (sin GPU)
+# verificación de la segmentación y del filtro de voz
 docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" stt \
     python -m scripts.verify_session
 docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" stt \
@@ -99,20 +99,24 @@ docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
 
 ## CPU y GPU: declarado, no detectado
 
-La **CPU es el caso base** y la **GPU es opt-in**. El modelo y el dispositivo se eligen con
-`MODEL_SIZE`, `DEVICE` y `COMPUTE_TYPE`; `docker-compose.gpu.yml` fija el perfil de GPU
-(`cuda`/`float16`/`medium`) y agrega `deploy.resources.reservations.devices` con driver
-`nvidia`. No hay preguntas ni autodetección: el perfil se declara en el comando.
+El **default es el entorno del plan de pruebas**: `medium` en una GPU NVIDIA
+(`float16`). El modelo y el dispositivo se eligen con `MODEL_SIZE`, `DEVICE` y
+`COMPUTE_TYPE`. Para una PC sin GPU (o con una que no alcanza) está
+`docker-compose.cpu.yml`, que fija `small`/`cpu`/`int8`, quita la reserva del dispositivo con
+`deploy: !reset` y compila la imagen con `requirements.txt` (sin las librerías de CUDA). No hay
+preguntas ni autodetección: el perfil se declara en el comando.
 
 | Quiero… | Comando |
 |---|---|
-| **sin GPU** (caso base) | `docker compose up --build` |
-| **con GPU** (opt-in) | `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build` |
+| **el default** (GPU, `medium`) | `docker compose up --build` |
+| **sin GPU** | `docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build` |
 
-No existen `docker-compose.cpu.yml` ni `Dockerfile.cpu`: el caso base ya es CPU y el único
-modo de pedir GPU es agregar el override. `/health` publica `device` (el efectivo) y
-`requested_device`; si CUDA falla al cargar, `load_model` cae a CPU como red de seguridad,
-pero eso no cambia el perfil que se declaró.
+`requirements-gpu.txt` (que incluye `requirements.txt` + `nvidia-cublas-cu12` y
+`nvidia-cudnn-cu12`) es lo que instala la imagen por defecto mediante el `ARG
+REQUIREMENTS_FILE` del `Dockerfile`. En el perfil de CPU esos 2,27 GB no van: `ctranslate2`
+solo los carga con `DEVICE=cuda`. `/health` publica `device` (el efectivo) y `requested_device`;
+si CUDA falla al cargar, `load_model` cae a CPU como red de seguridad, pero eso no cambia el
+perfil que se declaró.
 
 ## Trampas que cuestan tiempo
 
@@ -130,9 +134,10 @@ pero eso no cambia el perfil que se declaró.
   (medido con "cómo estás" y "estoy triste").
 - **`MAX_CONCURRENT_INFERENCE` es 1 a propósito.** Whisper serializa igual por debajo; con más
   de uno solo hay thrash.
-- **La GPU es opcional y la CPU es lenta.** El caso base es CPU; para GPU se agrega
-  `docker-compose.gpu.yml`. Si se pide CUDA y falla al cargar el modelo, el servicio cae a CPU
-  solo como red de seguridad, y `/health` publica el dispositivo efectivo.
+- **El default es GPU y la CPU es lenta.** `medium` en GPU es el entorno del plan de pruebas;
+  para una PC sin GPU se agrega `docker-compose.cpu.yml` (`small`/`cpu`/`int8`). Si se pide CUDA
+  y falla al cargar el modelo, el servicio cae a CPU solo como red de seguridad, y `/health`
+  publica el dispositivo efectivo.
 - **Partes de `app/main.py` y `app/metrics.py` no se pueden cubrir sin GPU o servicios
   externos**: la cobertura de esas líneas es deuda conocida, no un olvido.
 
