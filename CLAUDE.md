@@ -1,149 +1,99 @@
 # signall-stt — instrucciones para agentes
 
-Este archivo es para quien trabaja en el repositorio, sea una persona o un agente. Dice qué es
-esta pieza, cómo se trabaja y qué no se rompe. La puerta de entrada para alguien de afuera es el
-[`README.md`](README.md); el detalle de la API y de las variables está en
-[`docs/API-Y-CONFIGURACION.md`](docs/API-Y-CONFIGURACION.md).
+Pieza de SignAll: reconocimiento de voz en español con faster-whisper y WebRTC VAD. Empieza en el
+[`README.md`](README.md); la API, en [`docs/API-Y-CONFIGURACION.md`](docs/API-Y-CONFIGURACION.md).
 
-## Qué es esta pieza
+## Qué hace y qué no hace
 
-Servicio de reconocimiento de voz en español: **faster-whisper** más **WebRTC VAD**. Recibe
-audio crudo por WebSocket, detecta cuándo hay voz, transcribe y devuelve `partial` mientras la
-persona habla y un `final` cuando termina la frase. También acepta un archivo entero por
-`POST /transcribe`.
+- Recibe audio PCM16LE mono a 16 kHz por `WS /ws/transcribe`, lo corta con el detector de voz,
+  transcribe cada segmento y responde `partial` mientras la persona habla y `final` al terminar.
+- Acepta un archivo entero por `POST /transcribe` y expone `/health`, `/metrics` y `/metrics.json`.
+- Solo transcribe. No captura el micrófono, no corta el texto en oraciones, no traduce a glosas y
+  no decide qué se representa: eso es del backend. Tampoco guarda audio ni historial.
 
-**No** captura el micrófono, **no** corta el texto en oraciones, **no** traduce a glosas y **no**
-decide qué se representa. Todo eso es del backend.
+## Su lugar entre los repositorios
 
-## El sistema: cuatro repositorios y el avatar
+Los cinco repositorios viven en https://github.com/sign-ai-organization: signall-android, la app
+que captura el micrófono y representa las señas; signall-backend, el WebSocket con las glosas y el
+catálogo; este, audio a texto en el puerto 8000; signall-docs, los documentos de la tesis; y
+signall-avatar, en la rama `dev`.
 
-Este repositorio es **una pieza**. El sistema completo:
-
-| Repositorio | Qué es | Puerto |
-|---|---|---|
-| [signall-android](https://github.com/sign-ai-organization/signall-android) | la app: captura el micrófono, envía por WebSocket y representa las señas | — |
-| [signall-backend](https://github.com/sign-ai-organization/signall-backend) | FastAPI: WebSocket con la app, NLP de glosas, catálogo, caché semántico y Neon | 8080 |
-| **signall-stt** (este) | audio → texto en tiempo real | 8000 |
-| [signall-docs](https://github.com/sign-ai-organization/signall-docs) | los documentos de la tesis: SRS, SDD, memoria, plan de pruebas y plan de administración | — |
-| [signall-avatar](https://github.com/sign-ai-organization/signall-avatar) (rama `dev`) | producción de las animaciones con Cascadeur | — |
-
-**Los repositorios hermanos son fuentes de información, no cajas negras.** Antes de cambiar un
-frame del WebSocket, un nombre de métrica o un umbral que cruce a otro repositorio, se lee el
-otro lado: el contrato entre ellos son frames, y ningún compilador avisa cuando se rompe. Un
-cambio que cruza el contrato no está terminado hasta que el otro lado lo refleja; si queda
-pendiente, se dice en voz alta.
-
-`signall-docs` es además **el repositorio de documentación de la tesis y el que manda para lo
-escrito**. Los documentos formales son suyos y no hay copia en otro lugar. Cuando el código y un
-documento no coinciden, no se elige por cuenta propia: se determina cuál de los dos está mal y se
-pregunta al owner.
-
-## Cada cambio se documenta en `signall-docs`
-
-> **Cada cambio no trivial se documenta en `signall-docs`**: en `cambios/` (qué cambió y por qué)
-> y, si toca un documento formal, se actualiza el `.tex` y se compila con `make`. Una sesión que
-> termina sin dejar rastro ahí no está terminada.
-
-Es un estándar, no una sugerencia. En este repositorio el rastro de trabajo es además
-`docs/sessions/YYYY-MM-DD-<slug>.md`.
+El único consumidor es el backend, que llama en `ws://stt:8000/ws/transcribe` dentro de la red de
+compose o en `ws://localhost:8000/ws/transcribe` desde el host (`STT_WS_URL`). La app Android
+nunca habla con este servicio. Los hermanos son fuentes de información: antes de cambiar un frame,
+un umbral o una métrica se lee el otro lado, y el cambio no está terminado hasta que lo refleja.
 
 ## El contrato con el backend
 
-El consumidor es **solo** `signall-backend`, que llama este servicio en
-`ws://stt:8000/ws/transcribe` dentro de la red de compose o en
-`ws://localhost:8000/ws/transcribe` desde el host (`STT_WS_URL`). **La app Android nunca habla
-con el STT.**
+- A todo `end` responde un `final`, aunque vaya vacío. Un `end` sin respuesta deja la frase
+  colgada en el backend.
+- Acá no se traduce nada: la frase escrita que el cliente manda como `text` va derecho al backend
+  y nunca pasa por acá, porque el backend la tomaría por voz.
+- El frame `capability` no es de este servicio: lo manda el backend a la app. Acá solo viajan
+  `partial` y `final`.
+- Las métricas llevan prefijo `stt_*` y salen del registro en `app/metrics.py`: `stt_inference_ms`,
+  `stt_final_ms`, `stt_partial_ms`, `stt_partial_queue_ms`, `stt_end_to_final_ms` y
+  `stt_dropped_total{reason}`. Un número que no se instrumentó en las dos partes no se compara.
+- Para cambiar un frame o una métrica se leen `signall-android/docs/SISTEMA.md` y
+  `signall-backend/docs/android-integration.md`.
 
-Lo que no se rompe:
+## Los dos perfiles
 
-- **El `final` siempre llega, incluso vacío.** El servicio tiene que responder a **todo** `end`
-  con un `final`, aunque no se haya escuchado nada. Un `end` sin respuesta deja la frase colgada
-  en el backend.
-- **No se traduce nada acá.** Este servicio transcribe; la frase escrita que el cliente manda
-  como `text` va derecho al backend y nunca pasa por acá. Si el STT devolviera texto que no vino
-  del audio, el backend lo tomaría por voz.
-- **El frame `capability` no es de este servicio**: lo manda el backend a la app al abrir la
-  sesión. Acá solo viajan los frames de voz (`partial` y `final`).
-- **Los nombres de métrica son `stt_*`** y viven en `app/metrics.py`. Un número que no se
-  instrumentó en las dos partes no se puede comparar con nada.
-
-Para cambiar un frame o un nombre de métrica, primero se lee el otro lado:
-`signall-android/docs/SISTEMA.md` y `signall-backend/docs/android-integration.md`.
-
-## Cómo se trabaja
+El default es el entorno del plan de pruebas: `medium` en una GPU NVIDIA con `float16`, y la GPU
+reservada en compose. No se cambia sin decisión del owner.
 
 ```bash
-# el servicio, solo
-docker compose up --build                                                # default: GPU, medium
-docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build # sin GPU
+docker compose up --build                                                  # default: GPU, medium
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build  # sin GPU
+```
 
-# verificación de la segmentación y del filtro de voz
+- `docker-compose.cpu.yml` es el override para un equipo sin GPU o con una que no alcanza: fija
+  `small`/`cpu`/`int8`, quita la reserva con `deploy: !reset` y compila con `requirements.txt`.
+- `requirements-gpu.txt` incluye `requirements.txt` y suma `nvidia-cublas-cu12` y
+  `nvidia-cudnn-cu12`: es lo que instala la imagen por defecto, por el `ARG REQUIREMENTS_FILE` del
+  `Dockerfile`, y `ctranslate2` solo los carga con `DEVICE=cuda`.
+- Nada detecta el hardware: el perfil se declara en el comando. `/health` publica `device` y
+  `requested_device`; si CUDA falla al cargar, el modelo cae a CPU y eso no cambia el perfil
+  declarado.
+
+## Cómo se trabaja y se verifica
+
+```bash
+curl -s http://localhost:8000/health      # y /metrics.json, para latencias y descartes
+./scripts/cobertura.sh          # pytest y los dos scripts, en contenedor descartable
+tools/calidad/verificar.sh      # compilación y escaneo de credenciales
+
+# segmentación y filtro de voz, sin GPU
 docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" stt \
     python -m scripts.verify_session
 docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" stt \
     python -m scripts.verify_non_speech
-
-# pruebas y cobertura (contenedor descartable, instala requirements-dev.txt)
-./scripts/cobertura.sh
-
-# sintaxis
-python -m compileall -q app scripts
 ```
 
-El sistema completo —con el proxy TLS, que es parte del sistema— se levanta desde
-`signall-backend`:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
-```
-
-## CPU y GPU: declarado, no detectado
-
-El **default es el entorno del plan de pruebas**: `medium` en una GPU NVIDIA
-(`float16`). El modelo y el dispositivo se eligen con `MODEL_SIZE`, `DEVICE` y
-`COMPUTE_TYPE`. Para una PC sin GPU (o con una que no alcanza) está
-`docker-compose.cpu.yml`, que fija `small`/`cpu`/`int8`, quita la reserva del dispositivo con
-`deploy: !reset` y compila la imagen con `requirements.txt` (sin las librerías de CUDA). No hay
-preguntas ni autodetección: el perfil se declara en el comando.
-
-| Quiero… | Comando |
-|---|---|
-| **el default** (GPU, `medium`) | `docker compose up --build` |
-| **sin GPU** | `docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build` |
-
-`requirements-gpu.txt` (que incluye `requirements.txt` + `nvidia-cublas-cu12` y
-`nvidia-cudnn-cu12`) es lo que instala la imagen por defecto mediante el `ARG
-REQUIREMENTS_FILE` del `Dockerfile`. En el perfil de CPU esos 2,27 GB no van: `ctranslate2`
-solo los carga con `DEVICE=cuda`. `/health` publica `device` (el efectivo) y `requested_device`;
-si CUDA falla al cargar, `load_model` cae a CPU como red de seguridad, pero eso no cambia el
-perfil que se declaró.
+El sistema completo, con el proxy TLS, se levanta desde `signall-backend` con
+`docker compose -f docker-compose.yml -f docker-compose.host.yml up -d`. Cada cambio no trivial se
+documenta en `signall-docs/cambios/` y deja su rastro en `docs/sessions/`; si toca un documento
+formal, se edita el `.tex` y se compila con `make`.
 
 ## Trampas que cuestan tiempo
 
-- **Los `.wav` de `fixtures/` no están en git.** Se regeneran con
-  `scripts/make_audio_fixtures.py`. Una prueba que dependa de ellos falla en un clon limpio si
-  no se regeneran.
-- **Los `scripts/` no se copian en la imagen.** Por eso las verificaciones se corren con
-  `-v "$PWD/scripts:/app/scripts"`; sin el volumen, `python -m scripts.x` dice que el módulo no
-  existe. Se corren **como módulo**: `python scripts/x.py` no resuelve `import app`.
-- **El primer arranque descarga el modelo** de Hugging Face al volumen `hf-cache` y tarda
-  varios minutos. `docker compose up` sin esperar a `/health` no significa que esté roto.
-- **`SILENCE_TIMEOUT_MS` es el mayor término de la latencia.** Bajarlo "para que responda más
-  rápido" parte las frases en las pausas. Antes de tocarlo, correr `verify_session`.
-- **`AVG_LOGPROB_THRESHOLD` no se sube a `-0.8`**: descarta audio que el modelo transcribió bien
-  (medido con "cómo estás" y "estoy triste").
-- **`MAX_CONCURRENT_INFERENCE` es 1 a propósito.** Whisper serializa igual por debajo; con más
-  de uno solo hay thrash.
-- **El default es GPU y la CPU es lenta.** `medium` en GPU es el entorno del plan de pruebas;
-  para una PC sin GPU se agrega `docker-compose.cpu.yml` (`small`/`cpu`/`int8`). Si se pide CUDA
-  y falla al cargar el modelo, el servicio cae a CPU solo como red de seguridad, y `/health`
-  publica el dispositivo efectivo.
-- **Partes de `app/main.py` y `app/metrics.py` no se pueden cubrir sin GPU o servicios
-  externos**: la cobertura de esas líneas es deuda conocida, no un olvido.
+- Los `.wav` de `fixtures/` no están en git. Se regeneran con `scripts/make_audio_fixtures.py`;
+  una prueba que dependa de ellos falla en un clon limpio.
+- Los `scripts/` no se copian en la imagen: hay utilidades de escritorio con dependencias que el
+  servicio no tiene. Se montan con `-v` y se corren como módulo, porque `python scripts/x.py` no
+  resuelve `import app`.
+- El primer arranque descarga el modelo de Hugging Face al volumen `hf-cache` y tarda varios
+  minutos. Un `up` que todavía no responde en `/health` no está roto.
+- `SILENCE_TIMEOUT_MS` es el mayor término de la latencia; bajarlo parte las frases en las pausas,
+  y una frase partida son dos señas. Antes de tocarlo, correr `verify_session`.
+- `AVG_LOGPROB_THRESHOLD` no se sube a `-0.8`: descarta audio que el modelo transcribió bien.
+- `MAX_CONCURRENT_INFERENCE` es 1 a propósito: Whisper serializa igual por debajo.
+- Partes de `app/main.py` y `app/metrics.py` no se cubren sin GPU ni servicios externos: esa
+  cobertura es deuda conocida, no un olvido.
 
 ## Estilo
 
-- Código y comentarios en inglés; los mensajes de usuario y los `PASS`/`FAIL` de las
-  verificaciones, en español.
-- Commit directo a `main`, con Conventional Commits. No se abren PRs.
+- Código y comentarios en inglés; los mensajes de usuario y los `PASS`/`FAIL`, en español.
+- Commit directo a `main` con Conventional Commits (`feat`, `fix`, `docs`, `refactor`, `chore`,
+  `test`). No se abren PRs.
 - Los repositorios se nombran por nombre y URL, nunca por ruta absoluta de una máquina.
